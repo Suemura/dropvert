@@ -102,7 +102,9 @@ on open droppedItems
 	-- 件数が多いときのためにパスは NUL 区切りのリストから xargs で渡す。
 	if succListPath is not "" then
 		try
-			set trashFailed to do shell script shellPrefix & "/usr/bin/xargs -0 -n 200 /usr/bin/osascript -l JavaScript " & quoted form of (POSIX path of (path to resource "trash.js")) & " < " & quoted form of succListPath
+			-- trash.js は成功時も空行を 1 行返す。xargs が 200 件ごとに分割すると
+			-- その空行が積み上がって「失敗した」と誤判定するため、空行を落とす。
+			set trashFailed to do shell script shellPrefix & "/usr/bin/xargs -0 -n 200 /usr/bin/osascript -l JavaScript " & quoted form of (POSIX path of (path to resource "trash.js")) & " < " & quoted form of succListPath & " | /usr/bin/sed '/^[[:space:]]*$/d'"
 		on error errMsg
 			set trashFailed to errMsg
 		end try
