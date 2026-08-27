@@ -15,6 +15,8 @@ osacompile -o "$app" "$src_dir/Dropvert.applescript"
 # スクリプトを bundle 内 Resources に同梱 (path to resource で参照される)
 cp "$src_dir/convert.sh" "$app/Contents/Resources/convert.sh"
 chmod +x "$app/Contents/Resources/convert.sh"
+cp "$src_dir/run.sh" "$app/Contents/Resources/run.sh"
+chmod +x "$app/Contents/Resources/run.sh"
 cp "$src_dir/trash.js" "$app/Contents/Resources/trash.js"
 
 # 画像ファイルのドロップを受け付けるよう宣言

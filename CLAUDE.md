@@ -18,15 +18,20 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
 
 ## ファイル構成と役割
 
-- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、`convert.sh` を 1 ファイルずつ呼び、成功分をまとめて `trash.js` に渡し、結果を通知する。ここに変換ロジックを書かない
+- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、入力パスを一時ファイルに書いて `run.sh` を **1 回だけ** 呼び、成功分をまとめて `trash.js` に渡し、結果を通知する。ここに変換ロジックを書かない
+- `run.sh` — 複数ファイルの変換を `xargs -P` で並列実行し、結果を集約するオーケストレータ。**元ファイルの削除は行わない**。stdout はタブ区切りのサマリ行のみを返す契約:
+  - `TMP<TAB>作業ディレクトリ` — 必ず 1 行。呼び出し側が使い終わったら削除する
+  - `CONVERTED<TAB>件数` / `SKIPPED<TAB>件数` — 必ず各 1 行
+  - `LIST<TAB>パス` — 成功が 1 件以上のときのみ。成功した **元ファイル**のパスを NUL 区切りで並べたファイル
+  - `FAIL<TAB>ファイル名<TAB>理由` — 失敗 1 件につき 1 行
 - `trash.js` — 渡されたパスを `NSFileManager` でゴミ箱へ移動する JXA スクリプト。失敗したパスを 1 行ずつ stdout に返す（成功時は空）。**ここを Finder への AppleEvent に置き換えてはいけない**（下記「注意点」参照）
 - `convert.sh` — 1 ファイルの変換のみを担う。**元ファイルの削除は行わない**（責務分離）。stdout で結果を返す契約:
   - 成功 → 生成した `.webp` の絶対パス
   - 対象外 → `SKIP`
   - 失敗 → `FAIL:理由`（理由は 1 行のみ）
-- `build.sh` — `osacompile` でアプリを生成し、`convert.sh` と `trash.js` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleDocumentTypes`（`public.image`）を追加し、**最後に ad-hoc 署名を付け直す**
+- `build.sh` — `osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleDocumentTypes`（`public.image`）を追加し、**最後に ad-hoc 署名を付け直す**
 
-この stdout 契約は AppleScript 側の分岐が依存しています。変更する場合は両方を同時に直してください。
+stdout の契約は 2 段になっています。`convert.sh` の 1 行契約は `run.sh` が、`run.sh` のサマリ契約は AppleScript 側の分岐が依存しています。変更する場合は依存する側も同時に直してください。
 
 ## ビルドと確認
 
@@ -56,6 +61,10 @@ open -a ~/Applications/Dropvert.app /tmp/t/a.png /tmp/t/b.jpg
 sips -s format png /System/Library/CoreServices/DefaultDesktop.heic --out /tmp/t/a.png
 
 ./convert.sh /tmp/t/a.png 85
+
+# 複数ファイルをまとめて（第 3 引数は並列度。0 で hw.ncpu、1 で逐次）
+ls /tmp/t/*.png > /tmp/t.list
+./run.sh /tmp/t.list 85 0
 ```
 
 最低限、次のケースを確認してください。
@@ -66,6 +75,15 @@ sips -s format png /System/Library/CoreServices/DefaultDesktop.heic --out /tmp/t
 - `.webp` を入力 → `SKIP` を返すこと
 - 壊れたファイル（`echo bad > x.png`）→ `FAIL:` を返し、出力の残骸が残らないこと
 - フォルダ → 削除されないこと
+- スペース・日本語・絵文字を含むファイル名
+
+並列化に関わる部分は特に次を確認してください。ここが崩れると失敗したファイルを削除する事故になります。
+
+- 同一ディレクトリで同じ出力名を狙う入力（`a.png` と `a.tiff` など）→ 採番が重複しないこと
+- 同じ入力を多重に並列変換（`seq 1 60 | xargs -P 12 -I{} ./convert.sh /tmp/race/a.png 85`）→ 出力パスがすべてユニークで 0 バイトの残骸が残らないこと
+- 正常なファイルと壊れたファイルの混在 → 壊れた方だけが残ること
+- 200 件を超えるドロップ → ゴミ箱への移動が `xargs` で分割されても全件移動されること
+- 並列度 1 と `hw.ncpu` で結果が一致すること
 
 ## 注意点
 
@@ -73,7 +91,11 @@ sips -s format png /System/Library/CoreServices/DefaultDesktop.heic --out /tmp/t
 - **ビルド後に bundle の中身を書き換えたら必ず再署名してください**。`osacompile` はアプリに ad-hoc 署名を付けます。その後 `Info.plist` や `Resources/` を変更すると署名が壊れ、`codesign --verify` が `invalid Info.plist (plist or signature have been modified)` を返す状態になります。この状態のアプリは macOS から不正扱いされ、**TCC の権限ダイアログが表示されないまま権限が拒否されます**（AppleEvents ならエラー -1743）。`build.sh` は最後に `codesign --force --sign -` を実行して検証まで行います
 - **ゴミ箱への移動に Finder を使ってはいけません**。`tell application "Finder" to delete` は AppleEvents（自動化）の権限を要求します。ad-hoc 署名のアプリは再ビルドごとに同一性が変わるため権限が定着せず、上記の署名問題とも重なって「ダイアログも出ないのに失敗する」状態になりました。`NSFileManager` の `trashItemAtURL`（`trash.js`）は権限を一切必要とせず、ゴミ箱の「元に戻す」も機能します
 - **droplet の PATH は最小構成です**。Homebrew のパスは通っていないため、`do shell script` の前に PATH を明示的に設定しています（`shellPrefix`）。新しい外部コマンドを使う場合は注意してください
+- **並列実行の前提を壊さないでください**。`run.sh` は入力に連番を振り、`inputs/NNN` と `results/NNN` の 1:1 対応で結果を受け取ります。複数プロセスの stdout を 1 つのパイプに集約すると行が混ざり、入力と結果の対応が崩れて**失敗したファイルを削除する**事故になります。集約は逐次で行ってください
+- **出力名の採番は `noclobber` による予約です**。`while [ -e "$out" ]` に戻すと、並列実行時に複数プロセスが同じ名前を掴みます。予約に使った 0 バイトファイルは `convert.sh` の EXIT trap が回収するため、trap の設定は必ず予約より前に置いてください
+- **ファイル名に改行を含むファイルは変換しません**。入力リストは改行区切りなので行がずれ、別のファイルを削除しうるためです。AppleScript 側で検出して失敗として扱っています
 - `do shell script` に渡す引数は必ず `quoted form of` を通してください。スペースを含むファイル名が壊れます
+- **パスをコマンドラインに積み上げないでください**。入力リストは一時ファイル経由、ゴミ箱へ渡すパスは NUL 区切りリストから `xargs -0 -n 200` で渡しています。数百件のドロップでコマンドライン長の上限にかかるのを避けるためです
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
 
 ## コミット・公開について
