@@ -9,14 +9,15 @@
 # 出力(stdout): タブ区切りのサマリ行のみ。
 #   TMP<TAB><作業ディレクトリ>            必ず 1 行。呼び出し側が使い終わったら削除する
 #   CONVERTED<TAB><件数>                  必ず 1 行
-#   SKIPPED<TAB><件数>                    必ず 1 行
+#   SKIPPED<TAB><件数>                    必ず 1 行。変換の対象外だったもの (.webp など)
+#   UNPROCESSED<TAB><件数>                必ず 1 行。cancel で着手しなかったもの
 #   LIST<TAB><パス>                       成功が 1 件以上のときのみ。成功した「元ファイル」の
 #                                         パスを NUL 区切りで並べたファイル
 #   FAIL<TAB><ファイル名><TAB><理由>      失敗 1 件につき 1 行
 #
 # 作業ディレクトリ内のファイルは呼び出し側との取り決め:
 #   results/    1 ファイル完了ごとに 1 件増える。数えれば完了件数になる（進行度表示用）
-#   cancel      呼び出し側が作ると、未着手のファイルを変換せず SKIP として終える
+#   cancel      呼び出し側が作ると、未着手のファイルを変換せず UNPROCESSED として終える
 #   exit        処理を終えると必ず作られる。呼び出し側の待ちループの終了条件
 #
 # 実際の変換は convert.sh が 1 ファイルずつ担当する（stdout 契約はそちらを参照）。
@@ -70,18 +71,20 @@ while IFS= read -r line || [ -n "$line" ]; do
 done <"$listfile"
 
 if [ "$total" -eq 0 ]; then
-	printf 'CONVERTED\t0\nSKIPPED\t0\n'
+	printf 'CONVERTED\t0\nSKIPPED\t0\nUNPROCESSED\t0\n'
 	exit 0
 fi
 
 # 並列変換。結果は parts/ に書いてから results/ へ mv する。
 # mv は同一ディレクトリ内でアトミックなので、results/ の件数は
 # 「開始した件数」ではなく「完了した件数」になる（進行度がずれない）。
-# cancel があれば変換せず SKIP を返す。中断でも「変換に失敗したファイル」を作らない。
+# cancel があれば変換せず CANCELLED を返す。中断でも「変換に失敗したファイル」を
+# 作らない。CANCELLED を SKIP と分けているのは、利用者に見せる文言を
+# 「対象外」と「未処理」で区別できるようにするため。
 seq 1 "$total" | xargs -P "$par" -I{} /bin/bash -c '
 	idx=$(printf "%04d" "$1")
 	if [ -e "$2/cancel" ]; then
-		printf "SKIP" >"$2/parts/$idx"
+		printf "CANCELLED" >"$2/parts/$idx"
 	else
 		src=$(cat "$2/inputs/$idx")
 		"$3" "$src" "$4" >"$2/parts/$idx" 2>/dev/null
@@ -92,6 +95,7 @@ seq 1 "$total" | xargs -P "$par" -I{} /bin/bash -c '
 # 集約は逐次で行う（競合の余地をなくす）
 converted=0
 skipped=0
+unprocessed=0
 succlist="$tmp/succeeded.list"
 : >"$succlist"
 
@@ -108,6 +112,8 @@ while [ "$i" -le "$total" ]; do
 		reason="変換プロセスが異常終了"
 	elif [ "$res" = "SKIP" ]; then
 		skipped=$((skipped + 1))
+	elif [ "$res" = "CANCELLED" ]; then
+		unprocessed=$((unprocessed + 1))
 	elif [ "${res#FAIL:}" != "$res" ]; then
 		reason="${res#FAIL:}"
 	elif [ ! -s "$res" ]; then
@@ -125,6 +131,7 @@ done
 
 printf 'CONVERTED\t%s\n' "$converted"
 printf 'SKIPPED\t%s\n' "$skipped"
+printf 'UNPROCESSED\t%s\n' "$unprocessed"
 if [ "$converted" -gt 0 ]; then
 	printf 'LIST\t%s\n' "$succlist"
 fi
