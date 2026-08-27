@@ -13,17 +13,18 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
 この 3 点はプロジェクトの根幹であり、リファクタリングで壊してはいけません。
 
 1. **シンプルさが機能である** — 設定 UI、ウィンドウ、環境設定ファイル、進捗バーは追加しない。ドロップ以外の操作を増やさない
-2. **元ファイルの削除は必ず検証の後** — 出力ファイルの存在とサイズ 0 でないことを確認して初めてゴミ箱へ移動する。`rm` は使わず Finder 経由（「元に戻す」を残す）。変換に失敗したファイルは絶対に削除しない
+2. **元ファイルの削除は必ず検証の後** — 出力ファイルの存在とサイズ 0 でないことを確認して初めてゴミ箱へ移動する。`rm` は使わず `NSFileManager` の `trashItemAtURL` を使う（「元に戻す」を残す）。変換に失敗したファイルは絶対に削除しない
 3. **既存ファイルを上書きしない** — 出力名が衝突したら `-1`, `-2` … を付けて退避する
 
 ## ファイル構成と役割
 
-- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、`convert.sh` を 1 ファイルずつ呼び、成功分をまとめてゴミ箱へ移動し、結果を通知する。ここに変換ロジックを書かない
+- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、`convert.sh` を 1 ファイルずつ呼び、成功分をまとめて `trash.js` に渡し、結果を通知する。ここに変換ロジックを書かない
+- `trash.js` — 渡されたパスを `NSFileManager` でゴミ箱へ移動する JXA スクリプト。失敗したパスを 1 行ずつ stdout に返す（成功時は空）。**ここを Finder への AppleEvent に置き換えてはいけない**（下記「注意点」参照）
 - `convert.sh` — 1 ファイルの変換のみを担う。**元ファイルの削除は行わない**（責務分離）。stdout で結果を返す契約:
   - 成功 → 生成した `.webp` の絶対パス
   - 対象外 → `SKIP`
   - 失敗 → `FAIL:理由`（理由は 1 行のみ）
-- `build.sh` — `osacompile` でアプリを生成し、`convert.sh` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleDocumentTypes`（`public.image`）を追加する
+- `build.sh` — `osacompile` でアプリを生成し、`convert.sh` と `trash.js` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleDocumentTypes`（`public.image`）を追加し、**最後に ad-hoc 署名を付け直す**
 
 この stdout 契約は AppleScript 側の分岐が依存しています。変更する場合は両方を同時に直してください。
 
@@ -44,7 +45,11 @@ osacompile -o /dev/null Dropvert.applescript
 
 ## テスト方法
 
-自動テストはありません。変更したら `convert.sh` を直接呼んで確認してください。ドロップ操作の GUI 部分は手動確認が必要です。
+自動テストはありません。変更したら `convert.sh` を直接呼んで確認してください。ドロップ操作を含む全体の確認は `open -a` で再現できます（実際のドロップと同じ `odoc` イベントが送られます）。
+
+```sh
+open -a ~/Applications/Dropvert.app /tmp/t/a.png /tmp/t/b.jpg
+```
 
 ```sh
 # テスト素材の作り方（macOS 標準の壁紙を利用）
@@ -65,6 +70,8 @@ sips -s format png /System/Library/CoreServices/DefaultDesktop.heic --out /tmp/t
 ## 注意点
 
 - **macOS の `sips` は WebP を書き出せません**（読み込みのみ）。`sips --formats` で `org.webmproject.webp` に `Writable` が付いていないことが確認できます。書き出しは `cwebp`（`brew install webp`）が担当します
+- **ビルド後に bundle の中身を書き換えたら必ず再署名してください**。`osacompile` はアプリに ad-hoc 署名を付けます。その後 `Info.plist` や `Resources/` を変更すると署名が壊れ、`codesign --verify` が `invalid Info.plist (plist or signature have been modified)` を返す状態になります。この状態のアプリは macOS から不正扱いされ、**TCC の権限ダイアログが表示されないまま権限が拒否されます**（AppleEvents ならエラー -1743）。`build.sh` は最後に `codesign --force --sign -` を実行して検証まで行います
+- **ゴミ箱への移動に Finder を使ってはいけません**。`tell application "Finder" to delete` は AppleEvents（自動化）の権限を要求します。ad-hoc 署名のアプリは再ビルドごとに同一性が変わるため権限が定着せず、上記の署名問題とも重なって「ダイアログも出ないのに失敗する」状態になりました。`NSFileManager` の `trashItemAtURL`（`trash.js`）は権限を一切必要とせず、ゴミ箱の「元に戻す」も機能します
 - **droplet の PATH は最小構成です**。Homebrew のパスは通っていないため、`do shell script` の前に PATH を明示的に設定しています（`shellPrefix`）。新しい外部コマンドを使う場合は注意してください
 - `do shell script` に渡す引数は必ず `quoted form of` を通してください。スペースを含むファイル名が壊れます
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください

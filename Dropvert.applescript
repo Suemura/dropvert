@@ -38,17 +38,26 @@ on open droppedItems
 		else
 			-- res は生成された .webp のパス。存在とサイズはシェル側で検証済み
 			set convertedCount to convertedCount + 1
-			set end of trashList to (anItem as alias)
+			set end of trashList to posixPath
 		end if
 	end repeat
 
-	-- 変換成功したものだけ、まとめてゴミ箱へ
+	-- 変換成功したものだけ、まとめてゴミ箱へ。
+	-- Finder への AppleEvent を使うと自動化の権限が必要になるため、
+	-- NSFileManager を直接叩く JXA スクリプト (trash.js) に任せる。
 	if (count of trashList) > 0 then
+		set trashArgs to ""
+		repeat with p in trashList
+			set trashArgs to trashArgs & " " & quoted form of (p as text)
+		end repeat
 		try
-			tell application "Finder" to delete trashList
+			set trashFailed to do shell script "/usr/bin/osascript -l JavaScript " & quoted form of (POSIX path of (path to resource "trash.js")) & trashArgs
 		on error errMsg
-			display alert "ゴミ箱への移動に失敗" message errMsg & return & return & "WebP の生成は完了しています。元ファイルは手動で削除してください。" as warning
+			set trashFailed to errMsg
 		end try
+		if trashFailed is not "" then
+			display alert "ゴミ箱への移動に失敗" message trashFailed & return & return & "変換後のファイルは生成済みです。元ファイルは手動で削除してください。" as warning
+		end if
 	end if
 
 	-- 結果通知
