@@ -39,6 +39,8 @@ on open droppedItems
 	set succListPath to ""
 	set tmpDir to ""
 	set listPath to ""
+	set workDir to ""
+	set cancelled to false
 
 	if (count of inputLines) > 0 then
 		set listPath to do shell script "/usr/bin/mktemp -t dropvert-input"
@@ -64,14 +66,75 @@ on open droppedItems
 			return
 		end try
 
+		-- 作業ディレクトリはこちらで作って run.sh に渡す。起動直後から
+		-- results/ を数えて進行度を出せるようにするため。
+		set workDir to do shell script "/usr/bin/mktemp -d -t dropvert-work"
+		set outPath to workDir & "/runner.out"
+		set totalCount to count of inputLines
+
+		-- 進捗ウィンドウはアプレットが自動で出し、on open を抜けると自動で消える。
+		-- 途中で閉じることはできない (total steps を 0 に戻しても残る) ので、
+		-- 失敗アラートを出す場合はアラートを閉じるまで背後に残ることになる。
+		set progress description to "画像を変換中"
+		set progress additional description to my progressText(0, totalCount)
+		set progress total steps to totalCount
+		set progress completed steps to 0
+
+		-- do shell script は同期呼び出しなので、待っている間は進行度を更新できない。
+		-- run.sh をバックグラウンドで起動し、PID を受け取って自分でポーリングする。
+		-- これで do shell script の暗黙のタイムアウト (2 分) にもかからない。
 		try
-			set res to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of webpQuality & " " & quoted form of parallelism
+			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of webpQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
 		on error errMsg
 			my removeFile(listPath)
-			display alert "変換に失敗しました" message errMsg as critical
+			my removeDir(workDir)
+			display alert "変換を開始できません" message errMsg as critical
 			return
 		end try
+
+		-- 進行度の見張り。1 回の呼び出しで「完了件数」と「まだ動いているか」を取る。
+		-- 終了判定は exit ファイルと kill -0 の二重。run.sh が異常終了しても抜けられる。
+		set statusCmd to "/bin/ls -1 " & quoted form of (workDir & "/results") & " 2>/dev/null | /usr/bin/wc -l | /usr/bin/tr -d ' '; " & my aliveCmd(workDir, runnerPID)
+		try
+			repeat
+				set statusText to do shell script statusCmd
+				set doneCount to (paragraph 1 of statusText) as integer
+				if doneCount > totalCount then set doneCount to totalCount
+				set progress completed steps to doneCount
+				set progress additional description to my progressText(doneCount, totalCount)
+				if (paragraph 2 of statusText) is "DONE" then exit repeat
+				delay 0.3
+			end repeat
+		on error number -128
+			-- 進捗ウィンドウの「停止」。cancel を置くと run.sh は未着手分を SKIP にして
+			-- 自然に終わるので、後始末は通常どおりサマリを見て行える。
+			set cancelled to true
+			try
+				do shell script "/usr/bin/touch " & quoted form of (workDir & "/cancel")
+			end try
+			repeat
+				try
+					if (do shell script my aliveCmd(workDir, runnerPID)) is "DONE" then exit repeat
+					delay 0.3
+				on error number -128
+					delay 0.3
+				end try
+			end repeat
+		end try
+		set progress completed steps to totalCount
+		set progress additional description to my progressText(totalCount, totalCount)
 		my removeFile(listPath)
+
+		try
+			set res to do shell script "/bin/cat " & quoted form of outPath
+		on error
+			set res to ""
+		end try
+		if res is "" then
+			my removeDir(workDir)
+			display alert "変換に失敗しました" message "変換プロセスが結果を返しませんでした。" as critical
+			return
+		end if
 
 		-- run.sh のサマリ行を解釈する (タブ区切り)
 		repeat with para in paragraphs of res
@@ -113,14 +176,12 @@ on open droppedItems
 		end if
 	end if
 
-	if tmpDir is not "" then
-		try
-			do shell script "/bin/rm -rf " & quoted form of tmpDir
-		end try
-	end if
+	my removeDir(tmpDir)
+	my removeDir(workDir)
 
 	-- 結果通知
 	set msg to (convertedCount as text) & " 件変換"
+	if cancelled then set msg to "中止 — " & msg
 	if skippedCount > 0 then set msg to msg & " / " & (skippedCount as text) & " 件スキップ"
 	if (count of failedList) > 0 then
 		set msg to msg & " / " & (count of failedList as text) & " 件失敗"
@@ -132,6 +193,26 @@ on open droppedItems
 		display notification msg with title "Dropvert" sound name "Glass"
 	end if
 end open
+
+-- 進捗ウィンドウに出す「12 / 40 (30%)」の文字列。
+on progressText(doneCount, totalCount)
+	set pct to 0
+	if totalCount > 0 then set pct to (doneCount * 100) div totalCount
+	return (doneCount as text) & " / " & (totalCount as text) & " (" & (pct as text) & "%)"
+end progressText
+
+-- run.sh がまだ動いているかを 1 行で返すシェル片。exit ファイルが先で、
+-- 無ければ PID の生存を見る (プロセスが消えていれば DONE)。
+on aliveCmd(wd, thePID)
+	return "if [ -e " & quoted form of (wd & "/exit") & " ]; then echo DONE; elif /bin/kill -0 " & thePID & " 2>/dev/null; then echo RUN; else echo DONE; fi"
+end aliveCmd
+
+on removeDir(p)
+	if p is "" then return
+	try
+		do shell script "/bin/rm -rf " & quoted form of p
+	end try
+end removeDir
 
 on removeFile(p)
 	if p is "" then return
