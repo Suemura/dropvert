@@ -231,7 +231,10 @@ webp)
 		tmpdir=$(mktemp -d -t dropvert)
 		err=$(sips -s format png ${cropsips[@]+"${cropsips[@]}"} "$src" --out "$tmpdir/mid.png" 2>&1) || true
 		if [ -s "$tmpdir/mid.png" ]; then
-			err=$(cwebp -quiet "${qflag[@]}" "$tmpdir/mid.png" -o "$out" 2>&1) || true
+			# -metadata icc は中間変換でも要る。sips は ICC プロファイルを
+			# 中間 PNG に引き継ぐので、ここで渡せば出力にも乗る。付け忘れると
+			# Display P3 の HEIC (iPhone の写真) が sRGB 扱いの WebP になる。
+			err=$(cwebp -quiet "${qflag[@]}" -metadata icc "$tmpdir/mid.png" -o "$out" 2>&1) || true
 		else
 			err="未対応の画像形式"
 		fi

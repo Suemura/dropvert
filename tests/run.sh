@@ -47,6 +47,7 @@ trap cleanup EXIT
 assets="$work/assets"
 mkdir -p "$assets"
 base="$assets/base.png"
+p3profile="/System/Library/ColorSync/Profiles/Display P3.icc"
 
 wallpaper=/System/Library/CoreServices/DefaultDesktop.heic
 if [ -f "$wallpaper" ]; then
@@ -79,6 +80,14 @@ make_asset() {
 		exit 1
 	fi
 }
+# 広色域の素材。ICC プロファイルを引き継げているかを見るのに使う。
+if [ -f "$p3profile" ]; then
+	sips -m "$p3profile" "$base" --out "$assets/p3.png" >/dev/null 2>&1 || true
+	if [ -s "$assets/p3.png" ]; then
+		sips -s format tiff "$assets/p3.png" --out "$assets/p3.tiff" >/dev/null 2>&1 || true
+	fi
+fi
+
 make_asset "$assets/base.jpg" jpeg
 make_asset "$assets/base.tiff" tiff
 make_asset "$assets/base.gif" gif
@@ -253,6 +262,24 @@ case_output_png() {
 	assert_eq "$case_dir/base.png" "$out" "出力パス"
 	assert_image "$case_dir/base.png" png
 	assert_dir_exactly "$case_dir" base.jpg base.png
+}
+
+# ICC プロファイルを落とさないこと。直行経路 (PNG) と sips 中間変換の経路
+# (TIFF) の両方で見る。中間変換の側で -metadata icc を付け忘れると、
+# Display P3 の写真 (iPhone の HEIC など) が sRGB 扱いの WebP になる。
+case_icc_profile_is_kept() {
+	if [ ! -s "$assets/p3.png" ] || [ ! -s "$assets/p3.tiff" ]; then
+		# Display P3 のプロファイルが無い環境では確かめられない
+		return 0
+	fi
+	setup p3.png p3.tiff
+	local got
+	for name in p3.png p3.tiff; do
+		"$conv" "$case_dir/$name" 85 >/dev/null
+		got=$(sips -g profile "$case_dir/${name%.*}.webp" 2>/dev/null | awk -F': ' '/profile:/ {print $2}')
+		assert_eq "Display P3" "$got" "[$name] の出力が ICC を保っている"
+		rm -f "$case_dir/${name%.*}.webp"
+	done
 }
 
 # lossless / 100 / 0。AVIF の 100 と lossless は 99 に丸める経路を通る
@@ -456,6 +483,7 @@ cases=(
 	case_output_avif
 	case_output_jpeg
 	case_output_png
+	case_icc_profile_is_kept
 	case_quality_extremes
 	case_quality_invalid
 	case_skip_same_format
