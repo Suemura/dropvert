@@ -7,6 +7,22 @@ src_dir=$(cd "$(dirname "$0")" && pwd)
 dest_dir="${1:-$HOME/Applications}"
 app="$dest_dir/Dropvert.app"
 
+# バージョン番号の唯一の出どころ。Homebrew cask の雛形にも同じ値が書いてあり、
+# ズレていないことは lint.sh が検査する (CLAUDE.md「ファイル構成と役割」の
+# VERSION の項を参照)。plist に書き込むのはここだけなので、形式の検証もここで
+# 行う (lint.sh を通さずに手で書き換えられても不正な値が入らないように)。
+# 読み込みと検証は既存の .app を消す前に済ませる (壊さずに失敗して終わるため)。
+version_file="$src_dir/VERSION"
+if [ ! -f "$version_file" ]; then
+	echo "VERSION が見つかりません: $version_file" >&2
+	exit 1
+fi
+version=$(head -n 1 "$version_file" | tr -d '[:space:]')
+if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "VERSION が SemVer (x.y.z) ではありません: '$version'" >&2
+	exit 1
+fi
+
 # Swift 製の同梱物 (設定ウィンドウ Prefs と、余白を測る Trim) を先にコンパイルする。
 # 既存のアプリを消す前に済ませておけば、コンパイルに失敗しても手元のアプリを
 # 壊さずに終われる。
@@ -70,6 +86,14 @@ bundle_id="io.github.suemura.dropvert"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" "$plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string 'public.image'" "$plist"
 
+# バージョン。osacompile の Info.plist はどちらのキーも持たないので Add 側に落ちる。
+# 表示用 (CFBundleShortVersionString) とビルド番号 (CFBundleVersion) を分けても
+# 管理する値が 2 つになるだけなので、同じ値を入れる。
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist" 2>/dev/null ||
+	/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $version" "$plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$plist" 2>/dev/null ||
+	/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $version" "$plist"
+
 # Swift 製のバイナリを先に ad-hoc 署名する。swiftc が付ける linker-signed 署名の
 # ままにせず、扱いを明示的にしておく。bundle の署名より必ず前に行うこと (後から
 # 中身を書き換えると bundle の署名が壊れる)。
@@ -86,4 +110,4 @@ if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
 fi
 
 touch "$app"
-echo "ビルド完了: $app"
+echo "ビルド完了: $app (v$version)"

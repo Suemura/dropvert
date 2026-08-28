@@ -72,3 +72,18 @@ jobs:
 
       - name: 署名を検証
         run: codesign --verify --deep --strict "$RUNNER_TEMP/out/Dropvert.app"
+
+      # lint.sh が見ているのはソース側（VERSION と cask の一致）だけ。
+      # ビルド成果物の Info.plist に実際に書き込まれたかはここで確かめる。
+      - name: バージョンを検証
+        run: |
+          plist="$RUNNER_TEMP/out/Dropvert.app/Contents/Info.plist"
+          expected=$(head -n 1 VERSION | tr -d '[:space:]')
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            actual=$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist")
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$key が '$actual' で、VERSION の '$expected' と一致しません" >&2
+              exit 1
+            fi
+          done
+          echo "バージョン: $expected"
