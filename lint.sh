@@ -91,6 +91,34 @@ else
 	ng "swiftc が見つかりません (xcode-select --install)"
 fi
 
+# 7. バージョン番号の整合。VERSION が唯一の出どころで、Homebrew cask の雛形が
+# それを写している。bundle identifier が 3 箇所に散って黙って不一致になった
+# 前例があるため (CLAUDE.md「設定」参照)、注意書きではなく機械で止める。
+check_version() {
+	local version_file="$here/VERSION" cask="$here/packaging/Casks/dropvert.rb"
+	if [ ! -f "$version_file" ]; then
+		echo "VERSION がありません" >&2
+		return 1
+	fi
+	local version
+	version=$(head -n 1 "$version_file" | tr -d '[:space:]')
+	if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+		echo "VERSION が SemVer ではありません: '$version'" >&2
+		return 1
+	fi
+	if [ ! -f "$cask" ]; then
+		echo "cask の雛形がありません: $cask" >&2
+		return 1
+	fi
+	local cask_version
+	cask_version=$(sed -n 's/^ *version "\([^"]*\)".*/\1/p' "$cask" | head -n 1)
+	if [ "$cask_version" != "$version" ]; then
+		echo "cask の version ($cask_version) が VERSION ($version) と一致しません" >&2
+		return 1
+	fi
+}
+run_check "VERSION と cask の整合" check_version
+
 if [ "$fail" -ne 0 ]; then
 	echo "lint: NG があります" >&2
 	exit 1

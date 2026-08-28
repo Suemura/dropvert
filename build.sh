@@ -14,6 +14,20 @@ app="$dest_dir/Dropvert.app"
 # xcode-select が Xcode を指していてライセンス未同意の場合、/usr/bin/swiftc も
 # xcrun も落ちる。Command Line Tools の swiftc は使えるが、xcrun 経由で SDK を
 # 解決できないぶん -sdk を明示する必要がある。
+# バージョン番号の唯一の出どころ。Homebrew cask の雛形にも同じ値が書いてあり、
+# ズレていないことは lint.sh が検査する (CLAUDE.md「バージョン番号」参照)。
+# 読み込みと検証は既存の .app を消す前に済ませる (壊さずに失敗して終わるため)。
+version_file="$src_dir/VERSION"
+if [ ! -f "$version_file" ]; then
+	echo "VERSION が見つかりません: $version_file" >&2
+	exit 1
+fi
+version=$(head -n 1 "$version_file" | tr -d '[:space:]')
+if [ -z "$version" ]; then
+	echo "VERSION が空です: $version_file" >&2
+	exit 1
+fi
+
 swiftc_bin=$(command -v swiftc || true)
 swiftc_sdk=()
 if [ -z "$swiftc_bin" ] || ! "$swiftc_bin" -version >/dev/null 2>&1; then
@@ -70,6 +84,14 @@ bundle_id="io.github.suemura.dropvert"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" "$plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string 'public.image'" "$plist"
 
+# バージョン。osacompile の Info.plist はどちらのキーも持たないので Add 側に落ちる。
+# 表示用 (CFBundleShortVersionString) とビルド番号 (CFBundleVersion) を分けても
+# 管理する値が 2 つになるだけなので、同じ値を入れる。
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist" 2>/dev/null ||
+	/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $version" "$plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$plist" 2>/dev/null ||
+	/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $version" "$plist"
+
 # Swift 製のバイナリを先に ad-hoc 署名する。swiftc が付ける linker-signed 署名の
 # ままにせず、扱いを明示的にしておく。bundle の署名より必ず前に行うこと (後から
 # 中身を書き換えると bundle の署名が壊れる)。
@@ -86,4 +108,4 @@ if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
 fi
 
 touch "$app"
-echo "ビルド完了: $app"
+echo "ビルド完了: $app (v$version)"

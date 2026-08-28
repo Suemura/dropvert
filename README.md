@@ -159,6 +159,10 @@ dropvert/
 ├── trash.js              # ゴミ箱へ移動する JXA スクリプト
 ├── build.sh              # アプリをビルドし、ad-hoc 署名を付け直す
 ├── lint.sh               # 静的チェック（開発用。アプリには同梱されない）
+├── VERSION               # バージョン番号（build.sh が Info.plist に書き込む）
+├── packaging/
+│   └── Casks/
+│       └── dropvert.rb   # Homebrew cask の雛形（未公開。リリース節を参照）
 ├── .editorconfig
 ├── README.md
 ├── CLAUDE.md
@@ -212,6 +216,27 @@ brew install shellcheck shfmt
 実行には `webp`（`cwebp` / `gif2webp` / `webpmux`）が必要です。Dropvert を使うためにインストール済みのはずですが、入っていなければ `brew install webp` を実行してください。
 
 push と Pull Request では GitHub Actions（`macos-latest`）が同じチェックとテスト、ビルド・署名検証を自動で実行します。ドラッグ&ドロップの操作そのものは自動化されていないため、手元での確認が必要です。
+
+### リリース
+
+バージョン番号はリポジトリ直下の `VERSION` に置いています。この 1 ファイルが唯一の出どころで、`build.sh` がビルド時に `Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` へ書き込みます。Homebrew cask の雛形（`packaging/Casks/dropvert.rb`）も同じ値を持つため、`./lint.sh` が両者の一致を検査します（ズレていれば CI が落ちます）。
+
+```sh
+# 1. バージョンを上げる（SemVer）
+echo 0.2.0 > VERSION
+# 2. cask 雛形の version も同じ値にする
+# 3. 一致とビルドを確認する
+./lint.sh && ./tests/run.sh && ./build.sh
+# 4. コミットしてタグを打つ
+git commit -am "chore: v0.2.0"
+git tag v0.2.0 && git push origin main --tags
+# 5. GitHub Release を作る（tarball が自動で添付される）
+gh release create v0.2.0 --generate-notes
+```
+
+ビルド済みの `.app` は配布していません。Apple Developer Program の証明書による署名と公証（notarization）を持たないため、ダウンロードした `.app` は Gatekeeper に阻まれてしまいます（ad-hoc 署名は公証の代わりになりません）。代わりに、利用者の手元でソースからビルドする Homebrew cask を用意する方針です。
+
+`packaging/Casks/dropvert.rb` は**まだどの tap にも公開していない雛形**です。公開するときは別リポジトリ `Suemura/homebrew-tap` の `Casks/` へコピーし、タグの tarball の `sha256` を埋めてください。
 
 ## 名前について
 
