@@ -188,6 +188,9 @@ defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 - **ゴミ箱へ移動するコマンドにパイプを足さないでください**。`do shell script` はパイプ全体（末尾のコマンド）の終了ステータスしか見ないため、`osascript` が起動できなかった場合の失敗を取りこぼします。ビルド後に `Resources/` を書き換えて再署名を忘れた状態がまさにこれに当たり、**元ファイルが 1 件もゴミ箱へ行っていないのに「N 件変換」と通知して静かに終わる**ことになります
 - **`run.sh` の生存確認に `kill -0` を使わないでください**。`exit` を書けなかった場合、PID が別プロセスに再利用されると永久に「実行中」を返してポーリングが終わりません。`ps -o command=` でコマンド行まで確認しています。中止待ちのループにも時間の上限を置いています
 - **設定ウィンドウは同期で待ってはいけません**。`do shell script` で `Prefs` の終了を待つと、アプレットは一度に 1 つのイベントしか扱えないため、**設定ウィンドウを開いている間にドロップされたファイルが処理されません**（ウィンドウを閉じるまで `on open` が始まらない）。バックグラウンドで起動して即座に制御を返し、二重に開かないための制御は `Prefs` 側（`flock` によるロックと distributed notification）に持たせています
+- **バックグラウンド起動は失敗を返しません**。シェルは即座に 0 を返すため、バイナリが壊れていても「ダブルクリックしても無反応」で終わります。終了コードを一時ファイルに書かせ、0.7 秒待って中身を見ています（空 = まだ動いている = 正常、`0` = 既に開いていて二重起動をやめた、それ以外 = 起動に失敗）。この方式のため、設定ウィンドウを開いている間は終了コードを待つ `sh` プロセスが 1 つ並走します（CPU は使いません）
+- **`DispatchWorkItem` は `cancel()` したあと `perform()` しても本体が実行されません**。設定の遅延書き込みを「work item に持たせて flush で perform」する形にすると、**スライダーを動かして 0.2 秒以内にウィンドウを閉じた値が黙って消えます**。書き込む値そのものを保持してください
+- **`NSApp.terminate` ではウィンドウの `windowWillClose` が呼ばれません**。⌘W / ⌘Q を自前で拾って terminate する構成では、`applicationWillTerminate` でも遅延中の書き込みを flush する必要があります
 - **`NSTitlebarAccessoryViewController` の view は frame でサイズを与えてください**。素の `NSView` は intrinsic size を持たないため、Auto Layout の制約だけで組むと幅 0 に潰れ、**何も表示されないのにエラーも出ません**
 - **`Contents/Resources/` に置いた実行バイナリは通常のリソースとして封印されます**（`CodeResources` に `hash` / `hash2` だけが載り、`cdhash` を持つ nested code にはならない）。そのため `codesign --verify --deep --strict` は通ります。ただし bundle の署名より**前に**バイナリを個別に ad-hoc 署名してください。署名後に中身を差し替えると bundle の署名が壊れます（上の落とし穴と同じ）
 - **Xcode のライセンスに同意していない環境では `/usr/bin/swiftc` も `xcrun` も落ちます**（`You have not agreed to the Xcode license agreements`）。Command Line Tools の `swiftc` は使えますが、`xcrun` 経由で SDK を解決できないため `-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` を明示する必要があります。`build.sh` はこの順で自動的にフォールバックします
