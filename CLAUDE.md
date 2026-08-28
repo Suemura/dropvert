@@ -87,7 +87,17 @@ bash -n convert.sh && bash -n run.sh && bash -n build.sh
 
 ## テスト方法
 
-自動テストはありません。変更したら `convert.sh` を直接呼んで確認してください。ドロップ操作を含む全体の確認は `open -a` で再現できます（実際のドロップと同じ `odoc` イベントが送られます）。
+CI（`.github/workflows/ci.yml`、`macos-latest`）が push / PR ごとに自動で回すのは **`./lint.sh` とビルド + 署名検証だけ**です。変換の自動テストはまだありません（テストハーネスができ次第 CI に足します）。
+
+次の層は CI では確認できません。**変更したら手で確かめてください。**
+
+- 変換そのもの（下記のケース一覧）— テストハーネスができるまでは手動
+- 実際のドラッグ&ドロップ（`odoc` イベント）と、進捗ウィンドウの「N / 全件 (X%)」の更新
+- 進捗ウィンドウの「停止」ボタンと、その連打時の後始末
+- `trash.js` を壊したアプリのコピーでの失敗検知
+- 設定ウィンドウの見た目（後述の「人が見てください」の項目）
+
+変更したら `convert.sh` を直接呼んで確認してください。ドロップ操作を含む全体の確認は `open -a` で再現できます（実際のドロップと同じ `odoc` イベントが送られます）。
 
 ```sh
 open -a ~/Applications/Dropvert.app /tmp/t/a.png /tmp/t/b.jpg
@@ -199,6 +209,8 @@ defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 - **`CFBundleIdentifier` を変えると通知の許可や LaunchServices の登録がリセットされます**。設定の保存先ドメインでもあるため、変更すると保存済みの設定も読めなくなります（`build.sh` の `bundle_id` と `Dropvert.applescript` の `prefsDomain` は必ず一致させること）
 - **AppleScript の文字列比較は大文字小文字を区別しません**。`"LOSSLESS" is "lossless"` は true になります。`defaults` に保存する値は、比較で一致した側の定数を代入して正規化しています（シェル側は大文字小文字を区別するため）
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
+- **`NSFileManager` の `trashItemAtURL` は GUI セッションがなくても動きます**。GitHub Actions の `macos-latest`（SSH セッションすら無い状態）で実測したところ、ファイルは `~/.Trash` へ移動し、`trash.js` は成功どおり 0 バイトを返しました。ゴミ箱への移動を CI のテストに含めても構いません（Finder への AppleEvent だったら権限が無くて動きません）
+- **`lint.sh` は shellcheck / shfmt が無いと `SKIP` して exit 0 を返します**。CI でそのまま使うと「入っていないから緑」になるため、ワークフロー側で `command -v` による存在確認と、ログに `SKIP` が出たら失敗させる歯止めを置いています。`lint.sh` 側に strict モードを足していないのは、ローカルでは brew を必須にしたくないためです
 - **シェルのコメントの最初の単語を `shellcheck` にしないでください**。shellcheck はコメント先頭の `shellcheck` を directive として解釈しようとし、続きが `key=value` の形でないと SC1073 / SC1072 のエラーになります（日本語の説明文でも同様）。また directive 行に `--` などで理由を続けて書くのも同じエラーになります。disable の理由は directive の**前の行**に、`shellcheck` という単語を行頭以外に置いて書いてください（`lint.sh` と `run.sh` で実際に 2 回踏んだ罠です）
 
 ## 開発ハーネス（`.claude/`）

@@ -3,8 +3,10 @@ name: CI
 # lint と build を自動実行する。ランナーが macos-latest なのは、sips / osacompile /
 # codesign / PlistBuddy が macOS にしか無いため。
 #
-# 変換・ドロップ・ゴミ箱移動の自動テスト (./tests/run.sh) はまだ無い。
+# 変換・ゴミ箱移動の自動テスト (./tests/run.sh) はまだ無い。
 # テストハーネスができたら test ステップを足すこと (#14 / #15)。
+# ゴミ箱への移動 (trash.js) は GUI セッションのないランナーでも動くことを
+# 実測済みなので、テストに含めてよい (CLAUDE.md「注意点」参照)。
 # CI で自動化できない層 (実際のドロップ、進捗ウィンドウ、停止ボタン、
 # 設定ウィンドウの見た目) は CLAUDE.md「テスト方法」の手動チェックリストを参照。
 
@@ -59,19 +61,3 @@ jobs:
 
       - name: 署名を検証
         run: codesign --verify --deep --strict "$RUNNER_TEMP/out/Dropvert.app"
-
-      # ▼ 一時的な調査ステップ (#16)。GUI セッションを持たないランナーで
-      # NSFileManager の trashItemAtURL が動くかどうかを実測する。
-      # 結果を CLAUDE.md に記録したら、このステップは削除すること。
-      - name: 調査 — headless での trashItemAtURL
-        run: |
-          probe="$RUNNER_TEMP/trash-probe.txt"
-          echo probe >"$probe"
-          out=$(osascript -l JavaScript trash.js "$probe" 2>&1) || true
-          printf 'stdout=[%s]\n' "$out"
-          if [ -e "$probe" ]; then
-            echo "結果: 元ファイルが残っている → ゴミ箱への移動は失敗"
-          else
-            echo "結果: 元ファイルが消えた → ゴミ箱への移動は成功"
-          fi
-          ls -la "$HOME/.Trash" || echo "ホームディレクトリに .Trash が無い"
