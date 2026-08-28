@@ -75,8 +75,23 @@ esac
 # アニメーション WebP を同じ形式へ書き戻さない。sips が 1 フレームに潰すため、
 # アニメーションが失われた出力で元ファイルがゴミ箱へ行ってしまう。
 # (別の形式への変換は従来どおり。1 フレームになるのは元からの挙動)
-if [ "$sameformat" = "1" ] && [ "$ext" = "webp" ] &&
-	head -c 64 "$src" 2>/dev/null | LC_ALL=C grep -q ANIM; then
+#
+# 判定はヘッダの決まった位置だけを見る。ANIM チャンクを探す形にすると、
+# 手前に ICC プロファイル (ICCP) が入っているファイルで位置が後ろへずれ、
+# アニメーションを静止画と読み違える。
+#   0-3   "RIFF"     8-11  "WEBP"    12-15 "VP8X" (拡張形式のときだけ)
+#   20    フラグ (0x02 が立っていればアニメーション)
+# VP8X が無ければ単一フレームなので、その時点で静止画と分かる。
+is_animated_webp() {
+	local hdr sig flags
+	hdr=$(od -An -tx1 -N 21 "$1" 2>/dev/null | tr -d ' \n')
+	[ "${#hdr}" -ge 42 ] || return 1
+	sig="${hdr:24:8}"
+	flags="${hdr:40:2}"
+	[ "$sig" = "56503858" ] || return 1 # "VP8X"
+	[ $((0x$flags & 2)) -ne 0 ]
+}
+if [ "$sameformat" = "1" ] && [ "$ext" = "webp" ] && is_animated_webp "$src"; then
 	echo "SKIP"
 	exit 0
 fi
