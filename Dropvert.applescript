@@ -1,24 +1,68 @@
--- Dropvert droplet: ドロップされた画像を WebP に変換し、成功したものだけ元ファイルをゴミ箱へ移動する
--- 変換品質 (0-100)。可逆圧縮にしたい場合は "lossless" と書く
-property webpQuality : "85"
+-- Dropvert droplet: ドロップされた画像を変換し、成功したものだけ元ファイルをゴミ箱へ移動する
+--   ダブルクリック (on run)  → 設定画面
+--   ドロップ    (on open)   → 保存済みの設定で即変換 (操作は増やさない)
+
+-- 設定の保存先ドメイン。build.sh が Info.plist に書く CFBundleIdentifier と
+-- 必ず一致させること。ずれると設定が黙って無視される。
+property prefsDomain : "io.github.suemura.dropvert"
+-- 設定を一度も触っていないときの値。ここだけで実用的に動くこと。
+property defaultQuality : "85"
+property defaultFormat : "webp"
+property defaultOriginal : "trash"
 -- 同時に変換する数。"0" で CPU コア数 (hw.ncpu)、"1" で逐次実行
 property parallelism : "0"
 
+-- 設定画面。1 枚の一覧が常に現在値を映し、変更 1 回につきサブダイアログは 1 枚だけ。
 on run
-	display dialog "画像ファイルをこのアプリのアイコンにドラッグ&ドロップしてください。" & return & return & "元と同じフォルダに .webp を作成し、成功したら元ファイルをゴミ箱へ移動します。" buttons {"OK"} default button 1 with title "Dropvert"
+	repeat
+		set s to my loadSettings()
+		set itemQuality to "圧縮率: " & my qualityLabel(quality of s)
+		set itemFormat to "出力形式: " & my formatLabel(fmt of s)
+		if orig of s is "keep" then
+			set itemOriginal to "元ファイル: 残す"
+		else
+			set itemOriginal to "元ファイル: ゴミ箱へ移動"
+		end if
+		set itemReset to "デフォルトに戻す"
+
+		set promptText to "画像ファイルをこのアプリのアイコンにドラッグ&ドロップすると変換します。" & return & "変更したい項目を選んでください。"
+		set chosen to choose from list {itemQuality, itemFormat, itemOriginal, itemReset} with title "Dropvert 設定" with prompt promptText OK button name "変更" cancel button name "閉じる"
+		if chosen is false then exit repeat
+
+		set picked to item 1 of chosen
+		if picked is itemQuality then
+			my editQuality(quality of s)
+		else if picked is itemFormat then
+			my editFormat(fmt of s)
+		else if picked is itemOriginal then
+			my editOriginal(orig of s)
+		else
+			try
+				do shell script "/usr/bin/defaults delete " & quoted form of prefsDomain
+			end try
+		end if
+	end repeat
 end run
 
 on open droppedItems
 	set shellPrefix to "export PATH=/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; "
 	set runnerPath to POSIX path of (path to resource "run.sh")
 
-	-- cwebp の存在確認
-	try
-		do shell script shellPrefix & "command -v cwebp"
-	on error
-		display alert "cwebp が見つかりません" message "Homebrew でインストールしてください:" & return & return & "brew install webp" as critical
-		return
-	end try
+	set s to my loadSettings()
+	set theQuality to quality of s
+	set theFormat to fmt of s
+	set theOriginal to orig of s
+
+	-- cwebp の存在確認。WebP だけは sips が書き出せず外部コマンドに頼るため、
+	-- 出力形式が WebP のときだけ確認する。
+	if theFormat is "webp" then
+		try
+			do shell script shellPrefix & "command -v cwebp"
+		on error
+			display alert "cwebp が見つかりません" message "WebP の書き出しには cwebp が必要です。Homebrew でインストールしてください:" & return & return & "brew install webp" & return & return & "アプリをダブルクリックすると、出力形式を AVIF / JPEG / PNG に変更できます (これらは追加のインストールなしで変換できます)。" as critical
+			return
+		end try
+	end if
 
 	-- 入力パスは一時ファイル経由で渡す。数百件ドロップされてもコマンドライン長の
 	-- 上限にかからない。ファイル名に改行を含むものは行がずれて別のファイルを
@@ -85,7 +129,7 @@ on open droppedItems
 		-- run.sh をバックグラウンドで起動し、PID を受け取って自分でポーリングする。
 		-- これで do shell script の暗黙のタイムアウト (2 分) にもかからない。
 		try
-			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of webpQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
+			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
 		on error errMsg
 			my removeFile(listPath)
 			my removeDir(workDir)
@@ -174,7 +218,7 @@ on open droppedItems
 		end repeat
 	end if
 
-	-- 変換に成功したものだけ、まとめてゴミ箱へ。
+	-- 変換に成功したものだけ、まとめてゴミ箱へ (設定が「残す」なら何もしない)。
 	-- Finder への AppleEvent を使うと自動化の権限が必要になるため、
 	-- NSFileManager を直接叩く JXA スクリプト (trash.js) に任せる。
 	-- 件数が多いときのためにパスは NUL 区切りのリストから xargs で渡す。
@@ -182,7 +226,7 @@ on open droppedItems
 	-- 閉じられない)。移動と後片付けを先に済ませ、画面表示は最後に回す。
 	-- こうしておけば連打で -128 が飛んできても消し残りが出ない。
 	set trashFailed to ""
-	if succListPath is not "" then
+	if succListPath is not "" and theOriginal is "trash" then
 		try
 			-- パイプを足してはいけない。do shell script はパイプ全体 (末尾のコマンド) の
 			-- 終了ステータスしか見ないため、osascript が起動できなかった場合の失敗を
@@ -224,6 +268,106 @@ on open droppedItems
 		end if
 	end try
 end open
+
+-- 設定の読み書き。保存先は defaults (~/Library/Preferences/<prefsDomain>.plist)。
+-- 独自の設定ファイルは持たない。値はすべて string で持ち、読むたびに検証して
+-- 不正なら既定値に落とす (書き戻しはしない = 触っていなければ plist を作らない)。
+on readPref(theKey, fallback)
+	try
+		return do shell script "/usr/bin/defaults read " & quoted form of prefsDomain & " " & quoted form of theKey
+	on error
+		return fallback
+	end try
+end readPref
+
+on writePref(theKey, theValue)
+	try
+		do shell script "/usr/bin/defaults write " & quoted form of prefsDomain & " " & quoted form of theKey & " -string " & quoted form of theValue
+	on error errMsg
+		display alert "設定を保存できませんでした" message errMsg as critical
+	end try
+end writePref
+
+on loadSettings()
+	set q to my readPref("quality", defaultQuality)
+	if my isValidQuality(q) is false then set q to defaultQuality
+	if q is "lossless" then set q to "lossless" -- 大文字表記を正規化する
+	set f to my readPref("format", defaultFormat)
+	if f is not in {"webp", "avif", "jpeg", "png"} then set f to defaultFormat
+	set o to my readPref("originalAction", defaultOriginal)
+	if o is not in {"trash", "keep"} then set o to defaultOriginal
+	return {quality:q, fmt:f, orig:o}
+end loadSettings
+
+-- 0〜100 の整数、または lossless だけを通す。"85.5" や "０" のような
+-- 見た目が紛らわしい値は、整数に直して文字列へ戻し一致するかで弾く。
+on isValidQuality(v)
+	if v is "lossless" then return true
+	try
+		set n to v as integer
+	on error
+		return false
+	end try
+	if (n as text) is not v then return false
+	if n < 0 or n > 100 then return false
+	return true
+end isValidQuality
+
+on qualityLabel(q)
+	if q is "lossless" then return "可逆 (lossless)"
+	return q
+end qualityLabel
+
+on formatLabel(f)
+	if f is "avif" then return "AVIF"
+	if f is "jpeg" then return "JPEG"
+	if f is "png" then return "PNG"
+	return "WebP"
+end formatLabel
+
+on editQuality(current)
+	set msg to "0〜100 の数値を入力してください。可逆圧縮にする場合は lossless と入力します。" & return & return & "JPEG / AVIF に可逆圧縮はありません。lossless を指定すると最高品質になります。PNG はもともと可逆のため、この値は使いません。"
+	try
+		set answer to text returned of (display dialog msg with title "圧縮率" default answer current buttons {"キャンセル", "OK"} default button "OK" cancel button "キャンセル")
+	on error number -128
+		return
+	end try
+	if my isValidQuality(answer) is false then
+		display alert "入力を確認してください" message "「" & answer & "」は使えません。0〜100 の数値か lossless を入力してください。" as warning
+		return
+	end if
+	if answer is "lossless" then set answer to "lossless"
+	my writePref("quality", answer)
+end editQuality
+
+on editFormat(current)
+	set labels to {"WebP", "AVIF", "JPEG", "PNG"}
+	set codes to {"webp", "avif", "jpeg", "png"}
+	set promptText to "変換後の形式を選んでください。" & return & "WebP には cwebp (brew install webp) が必要です。ほかの形式は追加のインストールなしで変換できます。"
+	set chosen to choose from list labels with title "出力形式" with prompt promptText default items {my formatLabel(current)} OK button name "決定" cancel button name "キャンセル"
+	if chosen is false then return
+	repeat with i from 1 to count of labels
+		if (item i of labels) is (item 1 of chosen) then my writePref("format", item i of codes)
+	end repeat
+end editFormat
+
+on editOriginal(current)
+	set trashLabel to "ゴミ箱へ移動"
+	set keepLabel to "残す"
+	if current is "keep" then
+		set currentLabel to keepLabel
+	else
+		set currentLabel to trashLabel
+	end if
+	set promptText to "変換に成功した元ファイルの扱いを選んでください。" & return & "変換に失敗したファイルは、どちらの設定でも削除されません。"
+	set chosen to choose from list {trashLabel, keepLabel} with title "元ファイルの扱い" with prompt promptText default items {currentLabel} OK button name "決定" cancel button name "キャンセル"
+	if chosen is false then return
+	if (item 1 of chosen) is keepLabel then
+		my writePref("originalAction", "keep")
+	else
+		my writePref("originalAction", "trash")
+	end if
+end editOriginal
 
 -- 進捗ウィンドウに出す「12 / 40 (30%)」の文字列。
 on progressText(doneCount, totalCount)
