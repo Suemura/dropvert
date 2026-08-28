@@ -740,6 +740,12 @@ STUB
 			break
 		fi
 	done
+	# results/ が「開始した件数」ではなく「完了した件数」であることを、
+	# 走っている最中に確かめる。並列度 1 でスタブは 0.3 秒かけるので、
+	# 2 件目は着手済みでも出力はまだ書いていない。ここが 1 でなければ
+	# 進捗ウィンドウの「N / 全件」が着手数を指していることになる。
+	assert_eq "1" "$(find "$case_dir/src" -name '*.webp' | grep -c . || true)" \
+		"results/ が 1 件の時点で完了した変換も 1 件"
 	: >"$wd/cancel"
 	wait
 
@@ -755,7 +761,8 @@ STUB
 	# 未着手は変換されない。スタブが作った出力の数が CONVERTED と一致する。
 	outputs=$(find "$case_dir/src" -name '*.webp' | grep -c . || true)
 	assert_eq "$converted" "$outputs" "変換された件数 = 生成された出力の数"
-	assert_eq "$converted" "$(nul_paths "$(sum "$out" LIST)" basename | wc -w | tr -d ' ')" \
+	# 件数は NUL の数で数える。空白を含む名前でも狂わない。
+	assert_eq "$converted" "$(tr -cd '\0' <"$(sum "$out" LIST)" | wc -c | tr -d ' ')" \
 		"LIST の件数 = CONVERTED"
 }
 
@@ -775,9 +782,12 @@ case_run_parallel_matches_sequential() {
 		mklist "$d/in.list" "$d/a.png" "$d/b.jpg" "$d/c.heic" "$d/d.webp" "$d/e.png"
 		"$repo/run.sh" "$d/in.list" 85 "$par" "$d/wd" >"$d/out.txt" 2>/dev/null
 		# TMP と LIST はパスが毎回変わるので、値ではなく件数だけを見る。
+		# FAIL は理由まで比べる (並列のときだけ理由が変わる退行を捕まえる)。
+		# 理由には入力の絶対パスが入っていて p1 / p0 で必ず食い違うので、
+		# ディレクトリの部分だけ落としてから比べる。
 		s=$(grep -E '^(CONVERTED|SKIPPED|UNPROCESSED)'$'\t' "$d/out.txt" | sort)
 		s="$s
-$(awk -F'\t' '$1 == "FAIL" {print $1 "\t" $2}' "$d/out.txt" | sort)
+$(awk -F'\t' '$1 == "FAIL" {gsub(/\/[^ ]*\//, "", $3); print $1 "\t" $2 "\t" $3}' "$d/out.txt" | sort)
 LIST:$(nul_paths "$(sum "$d/out.txt" LIST)" basename)"
 		if [ "$par" = "1" ]; then summary1=$s; else summary0=$s; fi
 	done
