@@ -122,6 +122,14 @@ WD=$(mktemp -d -t dropvert-work)
 - **`run.sh` の生存確認に `kill -0` を使わないでください**。`exit` を書けなかった場合、PID が別プロセスに再利用されると永久に「実行中」を返してポーリングが終わりません。`ps -o command=` でコマンド行まで確認しています。中止待ちのループにも時間の上限を置いています
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
 
+## 開発ハーネス（`.claude/`）
+
+- **コマンド**: `/start-issue <Issue番号>`（Issue 起点で worktree 作成 → 計画 → 実装 → 検証 → レビュー → PR 作成まで自走）、`/review-pr <PR番号>`、`/resolve-pr-comments <PR番号>`
+- **エージェント**: `planner`（実装計画と Sprint Contract の策定）、`reviewer`（PR 作成前の独立レビュー）
+- **ルール**: `workflow-orchestration` — サブエージェントの使い分け、コンテキストの手渡し、完了前検証の指針
+
+@.claude/rules/workflow-orchestration.md
+
 ## コミット・公開について
 
 - コミットメッセージは通常の記述で構いません（Conventional Commits 推奨）
