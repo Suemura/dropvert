@@ -4,8 +4,8 @@
 #
 # 未インストールの shfmt / shellcheck は該当の層を SKIP して続行する (exit 0 のまま)。
 # 導入は: brew install shellcheck shfmt
-# (この 2 行の語順が不自然なのは、コメントの最初の単語が shellcheck だと
-#  directive と誤解釈されて SC1073 になるため)
+# (語順が不自然なのはコメント先頭語 shellcheck が directive 扱いされるため。
+#  CLAUDE.md「注意点」参照)
 # osacompile / swiftc はこのプロジェクトの開発に必須なので、欠けていれば NG。
 set -u
 

@@ -199,6 +199,7 @@ defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 - **`CFBundleIdentifier` を変えると通知の許可や LaunchServices の登録がリセットされます**。設定の保存先ドメインでもあるため、変更すると保存済みの設定も読めなくなります（`build.sh` の `bundle_id` と `Dropvert.applescript` の `prefsDomain` は必ず一致させること）
 - **AppleScript の文字列比較は大文字小文字を区別しません**。`"LOSSLESS" is "lossless"` は true になります。`defaults` に保存する値は、比較で一致した側の定数を代入して正規化しています（シェル側は大文字小文字を区別するため）
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
+- **シェルのコメントの最初の単語を `shellcheck` にしないでください**。shellcheck はコメント先頭の `shellcheck` を directive として解釈しようとし、続きが `key=value` の形でないと SC1073 / SC1072 のエラーになります（日本語の説明文でも同様）。また directive 行に `--` などで理由を続けて書くのも同じエラーになります。disable の理由は directive の**前の行**に、`shellcheck` という単語を行頭以外に置いて書いてください（`lint.sh` と `run.sh` で実際に 2 回踏んだ罠です）
 
 ## 開発ハーネス（`.claude/`）
 
