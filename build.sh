@@ -7,8 +7,9 @@ src_dir=$(cd "$(dirname "$0")" && pwd)
 dest_dir="${1:-$HOME/Applications}"
 app="$dest_dir/Dropvert.app"
 
-# 設定ウィンドウ (Prefs.swift) を先にコンパイルする。既存のアプリを消す前に
-# 済ませておけば、コンパイルに失敗しても手元のアプリを壊さずに終われる。
+# Swift 製の同梱物 (設定ウィンドウ Prefs と、余白を測る Trim) を先にコンパイルする。
+# 既存のアプリを消す前に済ませておけば、コンパイルに失敗しても手元のアプリを
+# 壊さずに終われる。
 #
 # xcode-select が Xcode を指していてライセンス未同意の場合、/usr/bin/swiftc も
 # xcrun も落ちる。Command Line Tools の swiftc は使えるが、xcrun 経由で SDK を
@@ -32,6 +33,7 @@ trap 'rm -rf "$build_tmp"' EXIT
 # 空配列の "${arr[@]}" が unbound variable になるため (swiftc がそのまま
 # 使える環境では swiftc_sdk が空になる)。
 "$swiftc_bin" ${swiftc_sdk[@]+"${swiftc_sdk[@]}"} -O -o "$build_tmp/Prefs" "$src_dir/Prefs.swift"
+"$swiftc_bin" ${swiftc_sdk[@]+"${swiftc_sdk[@]}"} -O -o "$build_tmp/Trim" "$src_dir/Trim.swift"
 
 mkdir -p "$dest_dir"
 rm -rf "$app"
@@ -46,6 +48,9 @@ chmod +x "$app/Contents/Resources/run.sh"
 cp "$src_dir/trash.js" "$app/Contents/Resources/trash.js"
 cp "$build_tmp/Prefs" "$app/Contents/Resources/Prefs"
 chmod +x "$app/Contents/Resources/Prefs"
+# Trim は convert.sh が自分と同じディレクトリから探すので、必ず並べて置く
+cp "$build_tmp/Trim" "$app/Contents/Resources/Trim"
+chmod +x "$app/Contents/Resources/Trim"
 
 plist="$app/Contents/Info.plist"
 
@@ -65,10 +70,11 @@ bundle_id="io.github.suemura.dropvert"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" "$plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string 'public.image'" "$plist"
 
-# 設定バイナリを先に ad-hoc 署名する。swiftc が付ける linker-signed 署名のままに
-# せず、扱いを明示的にしておく。bundle の署名より必ず前に行うこと (後から中身を
-# 書き換えると bundle の署名が壊れる)。
+# Swift 製のバイナリを先に ad-hoc 署名する。swiftc が付ける linker-signed 署名の
+# ままにせず、扱いを明示的にしておく。bundle の署名より必ず前に行うこと (後から
+# 中身を書き換えると bundle の署名が壊れる)。
 codesign --force --sign - "$app/Contents/Resources/Prefs"
+codesign --force --sign - "$app/Contents/Resources/Trim"
 
 # Info.plist と Resources を書き換えると osacompile が付けた ad-hoc 署名が壊れる。
 # 署名が壊れたアプリは macOS から不正扱いされるため、必ず再署名する。
