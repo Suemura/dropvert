@@ -1,2 +1,5 @@
 .DS_Store
 *.app/
+
+# /start-issue が作る Issue 専用の git worktree
+.claude/worktrees/
