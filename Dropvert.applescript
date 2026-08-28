@@ -313,6 +313,19 @@ on isValidQuality(v)
 	return true
 end isValidQuality
 
+-- 貼り付けで前後に空白が入っても弾かれないようにする。
+on trimText(t)
+	set s to t
+	repeat while s starts with " " or s starts with tab
+		if (count of s) is 1 then return ""
+		set s to text 2 thru -1 of s
+	end repeat
+	repeat while s ends with " " or s ends with tab
+		set s to text 1 thru -2 of s
+	end repeat
+	return s
+end trimText
+
 on qualityLabel(q)
 	if q is "lossless" then return "可逆 (lossless)"
 	return q
@@ -332,6 +345,7 @@ on editQuality(current)
 	on error number -128
 		return
 	end try
+	set answer to my trimText(answer)
 	if my isValidQuality(answer) is false then
 		display alert "入力を確認してください" message "「" & answer & "」は使えません。0〜100 の数値か lossless を入力してください。" as warning
 		return

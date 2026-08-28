@@ -154,9 +154,15 @@ avif | jpeg | png)
 	# ファイルが残り、呼び出し側が「変換成功」と誤認して元ファイルを削除しうる。
 	tmpdir=$(mktemp -d -t dropvert)
 	mid="$tmpdir/out.$outext"
-	err=$(sips "${sipsopts[@]}" "$src" --out "$mid" 2>&1) || true
-	if [ -s "$mid" ]; then
-		mv -f "$mid" "$out" || err="出力を書き込めない"
+	if err=$(sips "${sipsopts[@]}" "$src" --out "$mid" 2>&1) && [ -s "$mid" ]; then
+		# 一時ディレクトリは $TMPDIR にあり、出力先と別のファイルシステムのことがある
+		# (外付けディスクなど)。その場合 mv は copy + unlink になり、途中で失敗すると
+		# 中途半端な出力が残る。サイズだけを見る後段の判定が「成功」と誤認して元ファイルを
+		# 削除しないよう、失敗したら予約したファイルごと消す。
+		if ! mv -f "$mid" "$out"; then
+			rm -f "$out"
+			err="出力を書き込めない"
+		fi
 	elif [ -z "$err" ]; then
 		err="未対応の画像形式"
 	fi
