@@ -1,7 +1,8 @@
 #!/bin/bash
 # 1ファイルを指定の形式に変換する。
-#   使い方: convert.sh <入力ファイル> <品質: 0-100 または lossless> [出力形式]
+#   使い方: convert.sh <入力ファイル> <品質: 0-100 または lossless> [出力形式] [余白トリム]
 #   出力形式: webp (既定) / avif / jpeg / png
+#   余白トリム: 1 で単色余白を切り落とす / 0 (既定) でそのまま
 #   出力(stdout): 成功=生成したファイルのパス / 対象外=SKIP / 失敗=FAIL:理由
 # 元ファイルの削除は呼び出し側(droplet)が担当する。
 set -u
@@ -9,6 +10,15 @@ set -u
 src="${1:-}"
 q="${2:-85}"
 fmt=$(printf '%s' "${3:-webp}" | tr '[:upper:]' '[:lower:]')
+trim="${4:-0}"
+case "$trim" in
+1) ;;
+*) trim=0 ;;
+esac
+
+# 余白を測る Trim は同じディレクトリに置かれている (bundle では Resources/)。
+here=$(cd "$(dirname "$0")" && pwd)
+trimbin="$here/Trim"
 
 if [ -z "$src" ]; then echo "FAIL:引数なし"; exit 0; fi
 if [ -d "$src" ]; then echo "FAIL:フォルダはスキップ"; exit 0; fi
@@ -60,6 +70,50 @@ case "$skipexts" in
 esac
 if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
 
+# 余白の測定。切り出しそのものは後段のエンコーダ (cwebp / sips) に任せるので、
+# ここで作るのは渡すオプションだけ。中間ファイルは作らない。
+#
+# トリムできない事情 (Trim が無い・読めない形式・余白なし・矩形が不正) は
+# すべて「オプションを付けない」に倒す。変換の失敗には昇格させないので、
+# 呼び出し側から見た契約は何も変わらない。
+#
+# 出力名を noclobber で予約する前に済ませる。予約したまま外部プロセスの終了を
+# 待つ時間を作らない。Trim は元ファイルを読むだけで副作用がない。
+#
+# GIF は対象外。gif2webp に crop オプションが無く、フレームごとに余白が
+# 異なりうるため、静止画に限る。
+cropwebp=()
+cropsips=()
+if [ "$trim" = "1" ] && [ "$ext" != "gif" ] && [ -x "$trimbin" ]; then
+	rect=$("$trimbin" "$src" 2>/dev/null) || rect=""
+	# "x y w h 元の幅 元の高さ" 以外 (NONE / FAIL: / 想定外) はトリムなし。
+	# 単語に割るあいだだけ glob を止める (理由の文字列が展開されないように)。
+	set -f
+	set -- $rect
+	set +f
+	if [ "$#" -eq 6 ]; then
+		rx="$1" ry="$2" rw="$3" rh="$4" rW="$5" rH="$6"
+		valid=1
+		for n in "$rx" "$ry" "$rw" "$rh" "$rW" "$rH"; do
+			case "$n" in
+			'' | *[!0-9]*) valid=0 ;;
+			esac
+		done
+		# sips は範囲外の --cropOffset をエラーにせず黙ってクランプする。
+		# 矩形が壊れたまま渡すと、別の絵になった出力で「変換成功」となり
+		# 元ファイルがゴミ箱へ行く。渡す前にここで必ず確かめる。
+		if [ "$valid" = "1" ] &&
+			[ "$rw" -gt 0 ] && [ "$rh" -gt 0 ] &&
+			[ $((rx + rw)) -le "$rW" ] && [ $((ry + rh)) -le "$rH" ] &&
+			{ [ "$rw" -ne "$rW" ] || [ "$rh" -ne "$rH" ]; }; then
+			cropwebp=(-crop "$rx" "$ry" "$rw" "$rh")
+			# sips の --cropOffset は「Y X」の順で、左上を原点として扱う
+			# (sips --help の "offsetY offsetH" という表記は当てにならない)。
+			cropsips=(-c "$rh" "$rw" --cropOffset "$ry" "$rx")
+		fi
+	fi
+fi
+
 tmpdir=""
 out=""
 cleanup() {
@@ -103,7 +157,7 @@ webp)
 	fi
 	case "$ext" in
 	png | jpg | jpeg | jpe | tif | tiff)
-		err=$(cwebp -quiet "${qflag[@]}" -metadata icc "$src" -o "$out" 2>&1) || true
+		err=$(cwebp -quiet "${qflag[@]}" ${cropwebp[@]+"${cropwebp[@]}"} -metadata icc "$src" -o "$out" 2>&1) || true
 		;;
 	gif)
 		if command -v gif2webp >/dev/null 2>&1; then
@@ -114,8 +168,12 @@ webp)
 		;;
 	*)
 		# heic/avif/bmp/psd/jxl など: sips で PNG に中間変換してから cwebp
+		#
+		# 切り出しは cwebp ではなく前段の sips に付ける。矩形は元ファイルを
+		# 測って得たものなので、それを読むツールに渡すのが確実で、中間変換が
+		# 向きを変えた場合でもずれた絵にならない。
 		tmpdir=$(mktemp -d -t dropvert)
-		err=$(sips -s format png "$src" --out "$tmpdir/mid.png" 2>&1) || true
+		err=$(sips -s format png ${cropsips[@]+"${cropsips[@]}"} "$src" --out "$tmpdir/mid.png" 2>&1) || true
 		if [ -s "$tmpdir/mid.png" ]; then
 			err=$(cwebp -quiet "${qflag[@]}" "$tmpdir/mid.png" -o "$out" 2>&1) || true
 		else
@@ -154,7 +212,7 @@ avif | jpeg | png)
 	# ファイルが残り、呼び出し側が「変換成功」と誤認して元ファイルを削除しうる。
 	tmpdir=$(mktemp -d -t dropvert)
 	mid="$tmpdir/out.$outext"
-	if ! err=$(sips "${sipsopts[@]}" "$src" --out "$mid" 2>&1); then
+	if ! err=$(sips "${sipsopts[@]}" ${cropsips[@]+"${cropsips[@]}"} "$src" --out "$mid" 2>&1); then
 		: # err には sips のエラーメッセージが入っている
 	elif [ ! -s "$mid" ]; then
 		# sips は成功したことになっているが出力が無い。err には成功時の標準出力
