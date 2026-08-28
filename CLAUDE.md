@@ -36,7 +36,7 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
   - 対象外 → `SKIP`（入力が出力形式と同じ形式のとき。`jpeg` は `.jpg` / `.jpeg` / `.jpe` を対象外とする）
   - 失敗 → `FAIL:理由`（理由は 1 行のみ）
 - `build.sh` — `Prefs.swift` を `swiftc` でコンパイルし、`osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` / `Prefs` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleIdentifier`（設定の保存先ドメイン）と `CFBundleDocumentTypes`（`public.image`）を設定し、**最後に ad-hoc 署名を付け直す**。Swift のコンパイルは既存の `.app` を消す前に行う（失敗しても手元のアプリを壊さないため）
-- `lint.sh` — 静的チェックを 1 コマンドにまとめた開発用スクリプト。`bash -n` / shellcheck / shfmt / `osacompile` / `node --check` / `swiftc -typecheck` を実行する。検査のみで、変換・削除・ビルドには関与せず、bundle にも同梱しない。shellcheck / shfmt が未インストールの環境では該当の層を `SKIP` して exit 0 を保つ（必須の開発依存を増やさないため）
+- `lint.sh` — 静的チェックを 1 コマンドにまとめた開発用スクリプト。`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` を実行する。検査のみで、変換・削除・ビルドには関与せず、bundle にも同梱しない。shellcheck / shfmt が未インストールの環境では該当の層を `SKIP` して exit 0 を保つ（必須の開発依存を増やさないため）
 
 ## 設定（`defaults`）
 
@@ -70,7 +70,7 @@ stdout の契約は 2 段になっています。`convert.sh` の 1 行契約は
 
 ビルドは既存の `.app` を削除してから作り直します。ソースを編集したら必ず再ビルドしてください。**アプリ内の `convert.sh` を直接編集しても、次のビルドで上書きされます。**
 
-構文チェックのみ行う場合は `./lint.sh` を使います（`bash -n` / shellcheck / shfmt / `osacompile` / `node --check` / `swiftc -typecheck` をまとめて実行。shellcheck / shfmt は `brew install shellcheck shfmt`、無ければ `SKIP`）。個別に実行する場合:
+構文チェックのみ行う場合は `./lint.sh` を使います（`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` をまとめて実行。shellcheck / shfmt は `brew install shellcheck shfmt`、無ければ `SKIP`）。個別に実行する場合:
 
 ```sh
 osacompile -o /dev/null Dropvert.applescript

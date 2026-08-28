@@ -6,7 +6,7 @@
 # 導入は: brew install shellcheck shfmt
 # (この 2 行の語順が不自然なのは、コメントの最初の単語が shellcheck だと
 #  directive と誤解釈されて SC1073 になるため)
-# osacompile / node / swiftc はこのプロジェクトの開発に必須なので、欠けていれば NG。
+# osacompile / swiftc はこのプロジェクトの開発に必須なので、欠けていれば NG。
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -57,12 +57,10 @@ fi
 run_check "osacompile Dropvert.applescript" \
 	osacompile -o /dev/null "$here/Dropvert.applescript"
 
-# 5. JXA の構文チェック (ESLint は $ / ObjC のグローバル定義が必要でオーバーキル)
-if command -v node >/dev/null 2>&1; then
-	run_check "node --check trash.js" node --check "$here/trash.js"
-else
-	ng "node が見つかりません"
-fi
+# 5. JXA の構文チェック。osacompile は JXA もコンパイルできるため node に依存しない
+# (ESLint は $ / ObjC のグローバル定義が必要でオーバーキル)
+run_check "osacompile -l JavaScript trash.js" \
+	osacompile -l JavaScript -o /dev/null "$here/trash.js"
 
 # 6. Swift の型チェック。ビルドより速く、.app を作り直さずに検証できる。
 # swiftc のフォールバックは build.sh と同じ: xcode-select が Xcode を指していて

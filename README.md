@@ -177,7 +177,7 @@ ls ~/Pictures/*.png > /tmp/list.txt
 ./lint.sh
 ```
 
-シェルスクリプトの構文チェック（`bash -n`）、AppleScript（`osacompile`）、JXA（`node --check`）、Swift（`swiftc -typecheck`）は追加インストールなしで動きます。shellcheck と shfmt によるチェックも行うには、次をインストールしてください（未インストールの場合、その項目は `SKIP` と表示されます）。
+シェルスクリプトの構文チェック（`bash -n`）、AppleScript / JXA（`osacompile`）、Swift（`swiftc -typecheck`）は追加インストールなしで動きます。shellcheck と shfmt によるチェックも行うには、次をインストールしてください（未インストールの場合、その項目は `SKIP` と表示されます）。
 
 ```sh
 brew install shellcheck shfmt
