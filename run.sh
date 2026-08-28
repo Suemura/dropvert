@@ -15,6 +15,11 @@
 #   UNPROCESSED<TAB><件数>                必ず 1 行。cancel で着手しなかったもの
 #   LIST<TAB><パス>                       成功が 1 件以上のときのみ。成功した「元ファイル」の
 #                                         パスを NUL 区切りで並べたファイル
+#   RENAME<TAB><パス>                     リネーム対象が 1 件以上のときのみ。「出力パス」と
+#                                         「リネーム先」のペアを NUL 区切りで並べたファイル。
+#                                         元ファイルが出力名を占有していた場合 (同じ形式のまま
+#                                         余白だけ削ったときなど) に出る。ゴミ箱へ移したあとで
+#                                         実行すること。元ファイルを残す設定なら実行しない
 #   FAIL<TAB><ファイル名><TAB><理由>      失敗 1 件につき 1 行
 #
 # 作業ディレクトリ内のファイルは呼び出し側との取り決め:
@@ -104,8 +109,11 @@ seq 1 "$total" | xargs -P "$par" -I{} /bin/bash -c '
 converted=0
 skipped=0
 unprocessed=0
+renames=0
 succlist="$tmp/succeeded.list"
+renlist="$tmp/rename.list"
 : >"$succlist"
+: >"$renlist"
 
 i=1
 while [ "$i" -le "$total" ]; do
@@ -130,6 +138,23 @@ while [ "$i" -le "$total" ]; do
 	else
 		converted=$((converted + 1))
 		printf '%s\0' "$src" >>"$succlist"
+
+		# 元ファイル自身が出力名を占有していた場合 (同じ形式のまま余白だけ削った
+		# ときなど)、採番されて "-1" が付いている。元ファイルをゴミ箱へ移したあとなら
+		# その名前が空くので、呼び出し側にリネームを頼む。
+		#
+		# 宛先は「元ファイルと同じ場所・同じ名前・出力の拡張子」に限る。無関係な
+		# 既存ファイルを踏まないよう、それが元ファイル自身を指すときだけ渡す。
+		# 拡張子の綴りだけが違う場合 (a.JPG → a.jpg) も同じ扱いにしたいので、
+		# 比較は小文字に揃えて行う。
+		outext="$(basename "$res")"
+		outext="${outext##*.}"
+		target="${src%.*}.$outext"
+		if [ "$target" != "$res" ] &&
+			[ "$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$src" | tr '[:upper:]' '[:lower:]')" ]; then
+			printf '%s\0%s\0' "$res" "$target" >>"$renlist"
+			renames=$((renames + 1))
+		fi
 	fi
 
 	if [ -n "$reason" ]; then
@@ -140,6 +165,9 @@ done
 printf 'CONVERTED\t%s\n' "$converted"
 printf 'SKIPPED\t%s\n' "$skipped"
 printf 'UNPROCESSED\t%s\n' "$unprocessed"
+if [ "$renames" -gt 0 ]; then
+	printf 'RENAME\t%s\n' "$renlist"
+fi
 if [ "$converted" -gt 0 ]; then
 	printf 'LIST\t%s\n' "$succlist"
 fi
