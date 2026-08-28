@@ -20,14 +20,6 @@ ext=$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')
 if [ "$ext" = "webp" ]; then echo "SKIP"; exit 0; fi
 if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
 
-# 出力名の衝突回避
-out="$dir/$name.webp"
-i=1
-while [ -e "$out" ]; do
-	out="$dir/$name-$i.webp"
-	i=$((i + 1))
-done
-
 if [ "$q" = "lossless" ]; then
 	qflag=(-lossless)
 else
@@ -35,8 +27,36 @@ else
 fi
 
 tmpdir=""
-cleanup() { [ -n "$tmpdir" ] && rm -rf "$tmpdir"; }
+out=""
+cleanup() {
+	[ -n "$tmpdir" ] && rm -rf "$tmpdir"
+	# 名前を予約しただけで中身を書けなかった出力は残さない
+	if [ -n "$out" ] && [ -e "$out" ] && [ ! -s "$out" ]; then rm -f "$out"; fi
+	return 0
+}
 trap cleanup EXIT
+
+# 出力名の衝突回避。
+# 並列実行では複数プロセスが同時に同じ名前を掴みうるため、noclobber で予約する。
+# noclobber 下の `: > file` は既存ファイルに対して必ず失敗するので、
+# 予約に成功したプロセスだけがその名前の所有者になる。
+i=0
+while [ "$i" -le 999 ]; do
+	if [ "$i" -eq 0 ]; then
+		cand="$dir/$name.webp"
+	else
+		cand="$dir/$name-$i.webp"
+	fi
+	if (set -o noclobber; : >"$cand") 2>/dev/null; then
+		out="$cand"
+		break
+	fi
+	i=$((i + 1))
+done
+if [ -z "$out" ]; then
+	echo "FAIL:出力名を確保できない"
+	exit 0
+fi
 
 err=""
 case "$ext" in
