@@ -10,9 +10,18 @@ src="${1:-}"
 q="${2:-85}"
 fmt=$(printf '%s' "${3:-webp}" | tr '[:upper:]' '[:lower:]')
 
-if [ -z "$src" ]; then echo "FAIL:引数なし"; exit 0; fi
-if [ -d "$src" ]; then echo "FAIL:フォルダはスキップ"; exit 0; fi
-if [ ! -f "$src" ]; then echo "FAIL:ファイルが存在しない"; exit 0; fi
+if [ -z "$src" ]; then
+	echo "FAIL:引数なし"
+	exit 0
+fi
+if [ -d "$src" ]; then
+	echo "FAIL:フォルダはスキップ"
+	exit 0
+fi
+if [ ! -f "$src" ]; then
+	echo "FAIL:ファイルが存在しない"
+	exit 0
+fi
 
 # 品質の防御。呼び出し側の検証をすり抜けても既定値で動かす。
 case "$q" in
@@ -58,7 +67,10 @@ case "$skipexts" in
 	exit 0
 	;;
 esac
-if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
+if [ ! -w "$dir" ]; then
+	echo "FAIL:書き込み権限なし"
+	exit 0
+fi
 
 tmpdir=""
 out=""
@@ -81,7 +93,10 @@ while [ "$i" -le 999 ]; do
 	else
 		cand="$dir/$name-$i.$outext"
 	fi
-	if (set -o noclobber; : >"$cand") 2>/dev/null; then
+	if (
+		set -o noclobber
+		: >"$cand"
+	) 2>/dev/null; then
 		out="$cand"
 		break
 	fi
