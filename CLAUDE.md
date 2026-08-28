@@ -132,7 +132,7 @@ swiftc -O -o ./Trim Trim.swift    # 落ちる場合は build.sh と同じ Comman
 ./Trim /tmp/t/pad.png             # "x y w h 元の幅 元の高さ" / NONE / FAIL:理由
 ```
 
-設定を変えた状態の確認は `defaults` を直接書き換えるのが早い（設定画面を開く必要はない）。
+設定を変えた状態の確認は `defaults` を直接書き換えるのが早い（設定画面を開く必要はない）。ただし**後片付けで `defaults delete <ドメイン>` を実行しないでください**。利用者が設定画面で選んだ値ごと消えます（実際に検証スクリプトでこれをやり、利用者の「余白の自動削除」が無効に戻って「機能が効かない」という報告につながりました）。触ったキーだけを `defaults delete <ドメイン> <キー>` で消すか、事前に読み出して元の値へ戻してください。
 
 ```sh
 defaults write io.github.suemura.dropvert format -string avif
