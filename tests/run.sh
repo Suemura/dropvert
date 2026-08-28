@@ -231,11 +231,22 @@ assert_summary_only() {
 # 位置が変わると、期待値が環境依存になる。
 nul_paths() {
 	# <NUL 区切りのファイル> [basename]
+	# 行そのものが出ない退行だと空のパスで呼ばれる。エラーで失敗の
+	# メッセージを汚さないよう、その場合は空を返す。
+	[ -n "${1:-}" ] && [ -f "$1" ] || return 0
 	if [ "${2:-}" = "basename" ]; then
 		tr '\0' '\n' <"$1" | sed 's|.*/||' | LC_ALL=C sort | tr '\n' ' '
 	else
 		tr '\0' '\n' <"$1" | LC_ALL=C sort | tr '\n' ' '
 	fi
+}
+
+# NUL 区切りのファイルを並び順のまま改行区切りにする。RENAME のように
+# 「ペアで並ぶ」ことに意味があるときは、こちらで中身を見る。
+nul_lines() {
+	# <NUL 区切りのファイル>
+	[ -n "${1:-}" ] && [ -f "$1" ] || return 0
+	tr '\0' '\n' <"$1" | sed '/^$/d'
 }
 
 # 余白トリムが効く状態を作る。convert.sh は自分と同じディレクトリの Trim を
@@ -631,7 +642,6 @@ case_run_workdir_contract() {
 
 # 早い段階で return する経路でも exit が残ること (trap の担保)
 case_run_exit_is_always_created() {
-	mkdir -p "$case_dir"
 	: >"$case_dir/empty.list"
 	"$repo/run.sh" "$case_dir/empty.list" 85 1 "$case_dir/wd-empty" >/dev/null 2>&1
 	if [ ! -e "$case_dir/wd-empty/exit" ]; then
@@ -644,8 +654,7 @@ case_run_exit_is_always_created() {
 }
 
 case_run_empty_list() {
-	mkdir -p "$case_dir"
-	local out
+	local out name
 	out="$case_dir/out.txt"
 	# 0 バイトのリストと、空行だけのリスト。どちらも 0 件として扱う。
 	: >"$case_dir/empty.list"
@@ -666,7 +675,6 @@ case_run_empty_list() {
 # AppleScript 側が 3 つのカウンタを 0 で初期化してからパースするので実害は
 # 無い。現行の挙動をそのまま固定する。
 case_run_missing_list() {
-	mkdir -p "$case_dir"
 	local out status
 	out="$case_dir/out.txt"
 	status=0
@@ -749,12 +757,16 @@ STUB
 	: >"$wd/cancel"
 	wait
 
+	# 行そのものが出ない退行だと空になる。空のまま [ -lt ] に渡すと
+	# 比較がエラーで偽になり、下の判定が黙って素通りする。
+	assert_eq "1" "$(sum_lines "$out" CONVERTED)" "CONVERTED は 1 行"
+	assert_eq "1" "$(sum_lines "$out" UNPROCESSED)" "UNPROCESSED は 1 行"
 	converted=$(sum "$out" CONVERTED)
 	unprocessed=$(sum "$out" UNPROCESSED)
-	if [ "$converted" -lt 1 ]; then
+	if [ "${converted:-0}" -lt 1 ]; then
 		bad "着手済みが 1 件も CONVERTED になっていない"
 	fi
-	if [ "$unprocessed" -lt 1 ]; then
+	if [ "${unprocessed:-0}" -lt 1 ]; then
 		bad "未着手が 1 件も UNPROCESSED になっていない"
 	fi
 	assert_eq "6" "$((converted + unprocessed + $(sum "$out" SKIPPED)))" "合計は入力件数"
@@ -762,14 +774,13 @@ STUB
 	outputs=$(find "$case_dir/src" -name '*.webp' | grep -c . || true)
 	assert_eq "$converted" "$outputs" "変換された件数 = 生成された出力の数"
 	# 件数は NUL の数で数える。空白を含む名前でも狂わない。
-	assert_eq "$converted" "$(tr -cd '\0' <"$(sum "$out" LIST)" | wc -c | tr -d ' ')" \
+	assert_eq "$converted" "$(nul_lines "$(sum "$out" LIST)" | grep -c . || true)" \
 		"LIST の件数 = CONVERTED"
 }
 
 # 並列度 1 と hw.ncpu で結果が変わらないこと。
 # 同じディレクトリで走らせると採番が絡むので、別の場所に同じ素材を撒く。
 case_run_parallel_matches_sequential() {
-	mkdir -p "$case_dir"
 	local par summary1 summary0 s
 	for par in 1 0; do
 		local d="$case_dir/p$par"
@@ -796,7 +807,6 @@ LIST:$(nul_paths "$(sum "$d/out.txt" LIST)" basename)"
 
 # 空白・日本語・絵文字を含む名前が LIST の NUL 区切りで壊れないこと
 case_run_tricky_file_names() {
-	mkdir -p "$case_dir"
 	local out list name
 	out="$case_dir/out.txt"
 	: >"$case_dir/in.list"
@@ -833,10 +843,61 @@ case_run_rename_contract() {
 	# 「出力パス」「リネーム先」のペア。出力は採番されて base-1.png になる。
 	assert_eq "base-1.png base.png " "$(nul_paths "$renlist" basename)" "RENAME の中身"
 	assert_eq "$case_dir/base-1.png"$'\n'"$case_dir/base.png" \
-		"$(tr '\0' '\n' <"$renlist" | sed '/^$/d')" "RENAME はペアで並ぶ"
+		"$(nul_lines "$renlist")" "RENAME はペアで並ぶ"
 	# LIST には元ファイルが入る (ゴミ箱へ移す対象)
 	assert_eq "base.png " "$(nul_paths "$(sum "$out" LIST)" basename)" "LIST の中身"
 	assert_summary_only "$out"
+
+	# 拡張子の綴りだけが違う場合 (BASE.JPG → BASE.jpg)。run.sh は宛先が
+	# 元ファイル自身を指すかどうかを小文字に揃えて比べている。ここを厳密一致に
+	# 戻すと、採番された "-1" が付いたまま残る。
+	cp "$assets/base.jpg" "$case_dir/BASE.JPG"
+	mklist "$case_dir/in2.list" "$case_dir/BASE.JPG"
+	"$sandbox/run.sh" "$case_dir/in2.list" 85 1 "$case_dir/wd2" jpeg 1 >"$out" 2>/dev/null
+	assert_eq "1" "$(sum "$out" CONVERTED)" "(前提) 大文字の .JPG も再エンコードされる"
+	assert_eq "1" "$(sum_lines "$out" RENAME)" "大文字の .JPG でも RENAME は 1 行"
+	assert_eq "$case_dir/BASE-1.jpg"$'\n'"$case_dir/BASE.jpg" \
+		"$(nul_lines "$(sum "$out" RENAME)")" \
+		"リネーム先は元ファイルと同じ名前で拡張子だけ小文字"
+}
+
+# 元ファイルをゴミ箱へ送る前の最後の砦。convert.sh が異常終了したり、
+# 検証をすり抜けた 0 バイトの出力を返したりしたときに、run.sh が
+# それを「変換成功」と数えて LIST に載せてしまうと元ファイルが失われる。
+# 実際の convert.sh はここに来る前に弾くので、スタブで直接この経路を作る。
+case_run_guards_before_delete() {
+	mkdir -p "$case_dir/src"
+	local out kind bin
+	out="$case_dir/out.txt"
+	cp "$assets/base.png" "$case_dir/src/a.png"
+	mklist "$case_dir/in.list" "$case_dir/src/a.png"
+
+	# silent  : 何も出さずに終わる          → 変換プロセスが異常終了
+	# empty   : 0 バイトの出力のパスを返す  → 出力ファイルを確認できない
+	for kind in silent empty; do
+		bin="$case_dir/bin-$kind"
+		mkdir -p "$bin"
+		cp "$repo/run.sh" "$bin/run.sh"
+		if [ "$kind" = "silent" ]; then
+			printf '#!/bin/sh\nexit 0\n' >"$bin/convert.sh"
+		else
+			# $1 や $out はスタブの中で展開される。ここで展開させない。
+			# shellcheck disable=SC2016
+			printf '#!/bin/sh\nout="${1%%.*}.webp"\n: >"$out"\necho "$out"\n' >"$bin/convert.sh"
+		fi
+		chmod +x "$bin/convert.sh"
+
+		"$bin/run.sh" "$case_dir/in.list" 85 1 "$case_dir/wd-$kind" >"$out" 2>/dev/null
+		assert_eq "0" "$(sum "$out" CONVERTED)" "[$kind] 変換成功として数えない"
+		assert_eq "1" "$(sum_lines "$out" FAIL)" "[$kind] FAIL は 1 行"
+		# LIST が出ると、その中身が丸ごとゴミ箱へ送られる
+		assert_eq "0" "$(sum_lines "$out" LIST)" "[$kind] LIST は出ない"
+		assert_summary_only "$out"
+	done
+	# 元ファイルはどちらの経路でも残っている
+	if [ ! -s "$case_dir/src/a.png" ]; then
+		bad "元ファイルが失われた"
+	fi
 }
 
 # ---------------------------------------------------------------- 実行
@@ -876,6 +937,7 @@ cases=(
 	case_run_parallel_matches_sequential
 	case_run_tricky_file_names
 	case_run_rename_contract
+	case_run_guards_before_delete
 )
 
 for c in "${cases[@]}"; do
