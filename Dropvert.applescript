@@ -12,36 +12,25 @@ property defaultOriginal : "trash"
 -- 同時に変換する数。"0" で CPU コア数 (hw.ncpu)、"1" で逐次実行
 property parallelism : "0"
 
--- 設定画面。1 枚の一覧が常に現在値を映し、変更 1 回につきサブダイアログは 1 枚だけ。
+-- 設定画面。同梱した Prefs (Swift 製) を開くだけ。設定の中身はあちらが持つ。
+--
+-- バックグラウンドで起動してすぐ制御を返すこと。同期で待つと、設定ウィンドウを
+-- 開いている間にドロップされたファイルが処理されない (アプレットは一度に 1 つの
+-- イベントしか扱えないため、on open が on run の後ろで待たされる)。
+-- ウィンドウが二重に開かないための制御は Prefs 側が持っている。
 on run
-	repeat
-		set s to my loadSettings()
-		set itemQuality to "圧縮率: " & my qualityLabel(quality of s)
-		set itemFormat to "出力形式: " & my formatLabel(fmt of s)
-		if orig of s is "keep" then
-			set itemOriginal to "元ファイル: 残す"
-		else
-			set itemOriginal to "元ファイル: ゴミ箱へ移動"
-		end if
-		set itemReset to "デフォルトに戻す"
-
-		set promptText to "画像ファイルをこのアプリのアイコンにドラッグ&ドロップすると変換します。" & return & "変更したい項目を選んでください。"
-		set chosen to choose from list {itemQuality, itemFormat, itemOriginal, itemReset} with title "Dropvert 設定" with prompt promptText OK button name "変更" cancel button name "閉じる"
-		if chosen is false then exit repeat
-
-		set picked to item 1 of chosen
-		if picked is itemQuality then
-			my editQuality(quality of s)
-		else if picked is itemFormat then
-			my editFormat(fmt of s)
-		else if picked is itemOriginal then
-			my editOriginal(orig of s)
-		else
-			try
-				do shell script "/usr/bin/defaults delete " & quoted form of prefsDomain
-			end try
-		end if
-	end repeat
+	try
+		set prefsPath to POSIX path of (path to resource "Prefs")
+	on error
+		display alert "設定画面を開けません" message "アプリの内容が壊れています。build.sh で再ビルドしてください。" as critical
+		return
+	end try
+	try
+		do shell script quoted form of prefsPath & " >/dev/null 2>&1 </dev/null &"
+	on error errMsg number errNum
+		if errNum is -128 then return
+		display alert "設定画面を開けません" message errMsg as critical
+	end try
 end run
 
 on open droppedItems
@@ -269,9 +258,11 @@ on open droppedItems
 	end try
 end open
 
--- 設定の読み書き。保存先は defaults (~/Library/Preferences/<prefsDomain>.plist)。
--- 独自の設定ファイルは持たない。値はすべて string で持ち、読むたびに検証して
--- 不正なら既定値に落とす (書き戻しはしない = 触っていなければ plist を作らない)。
+-- 設定の読み出し。保存先は defaults (~/Library/Preferences/<prefsDomain>.plist)。
+-- 書き込むのは設定ウィンドウ (Prefs) だけで、こちらは読むだけ。
+-- 値はすべて string で持ち、読むたびに検証して不正なら既定値に落とす
+-- (書き戻しはしない = 触っていなければ plist を作らない)。
+-- 手で defaults write された値や、古いバージョンが書いた値から身を守る役目もある。
 on readPref(theKey, fallback)
 	try
 		return do shell script "/usr/bin/defaults read " & quoted form of prefsDomain & " " & quoted form of theKey
@@ -279,14 +270,6 @@ on readPref(theKey, fallback)
 		return fallback
 	end try
 end readPref
-
-on writePref(theKey, theValue)
-	try
-		do shell script "/usr/bin/defaults write " & quoted form of prefsDomain & " " & quoted form of theKey & " -string " & quoted form of theValue
-	on error errMsg
-		display alert "設定を保存できませんでした" message errMsg as critical
-	end try
-end writePref
 
 on loadSettings()
 	set q to my readPref("quality", defaultQuality)
@@ -312,76 +295,6 @@ on isValidQuality(v)
 	if n < 0 or n > 100 then return false
 	return true
 end isValidQuality
-
--- 貼り付けで前後に空白が入っても弾かれないようにする。
-on trimText(t)
-	set s to t
-	repeat while s starts with " " or s starts with tab
-		if (count of s) is 1 then return ""
-		set s to text 2 thru -1 of s
-	end repeat
-	repeat while s ends with " " or s ends with tab
-		set s to text 1 thru -2 of s
-	end repeat
-	return s
-end trimText
-
-on qualityLabel(q)
-	if q is "lossless" then return "可逆 (lossless)"
-	return q
-end qualityLabel
-
-on formatLabel(f)
-	if f is "avif" then return "AVIF"
-	if f is "jpeg" then return "JPEG"
-	if f is "png" then return "PNG"
-	return "WebP"
-end formatLabel
-
-on editQuality(current)
-	set msg to "0〜100 の数値を入力してください。可逆圧縮にする場合は lossless と入力します。" & return & return & "JPEG / AVIF に可逆圧縮はありません。lossless を指定すると最高品質になります。PNG はもともと可逆のため、この値は使いません。"
-	try
-		set answer to text returned of (display dialog msg with title "圧縮率" default answer current buttons {"キャンセル", "OK"} default button "OK" cancel button "キャンセル")
-	on error number -128
-		return
-	end try
-	set answer to my trimText(answer)
-	if my isValidQuality(answer) is false then
-		display alert "入力を確認してください" message "「" & answer & "」は使えません。0〜100 の数値か lossless を入力してください。" as warning
-		return
-	end if
-	if answer is "lossless" then set answer to "lossless"
-	my writePref("quality", answer)
-end editQuality
-
-on editFormat(current)
-	set labels to {"WebP", "AVIF", "JPEG", "PNG"}
-	set codes to {"webp", "avif", "jpeg", "png"}
-	set promptText to "変換後の形式を選んでください。" & return & "WebP には cwebp (brew install webp) が必要です。ほかの形式は追加のインストールなしで変換できます。"
-	set chosen to choose from list labels with title "出力形式" with prompt promptText default items {my formatLabel(current)} OK button name "決定" cancel button name "キャンセル"
-	if chosen is false then return
-	repeat with i from 1 to count of labels
-		if (item i of labels) is (item 1 of chosen) then my writePref("format", item i of codes)
-	end repeat
-end editFormat
-
-on editOriginal(current)
-	set trashLabel to "ゴミ箱へ移動"
-	set keepLabel to "残す"
-	if current is "keep" then
-		set currentLabel to keepLabel
-	else
-		set currentLabel to trashLabel
-	end if
-	set promptText to "変換に成功した元ファイルの扱いを選んでください。" & return & "変換に失敗したファイルは、どちらの設定でも削除されません。"
-	set chosen to choose from list {trashLabel, keepLabel} with title "元ファイルの扱い" with prompt promptText default items {currentLabel} OK button name "決定" cancel button name "キャンセル"
-	if chosen is false then return
-	if (item 1 of chosen) is keepLabel then
-		my writePref("originalAction", "keep")
-	else
-		my writePref("originalAction", "trash")
-	end if
-end editOriginal
 
 -- 進捗ウィンドウに出す「12 / 40 (30%)」の文字列。
 on progressText(doneCount, totalCount)
