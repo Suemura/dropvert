@@ -9,6 +9,7 @@ property prefsDomain : "io.github.suemura.dropvert"
 property defaultQuality : "85"
 property defaultFormat : "webp"
 property defaultOriginal : "trash"
+property defaultTrim : "off"
 -- 同時に変換する数。"0" で CPU コア数 (hw.ncpu)、"1" で逐次実行
 property parallelism : "0"
 
@@ -67,6 +68,12 @@ on open droppedItems
 	set theQuality to quality of s
 	set theFormat to fmt of s
 	set theOriginal to orig of s
+	-- シェル側の語彙は 1 / 0。設定の "on" / "off" をここで写す。
+	if trim of s is "on" then
+		set theTrim to "1"
+	else
+		set theTrim to "0"
+	end if
 
 	-- cwebp の存在確認。WebP だけは sips が書き出せず外部コマンドに頼るため、
 	-- 出力形式が WebP のときだけ確認する。
@@ -144,7 +151,7 @@ on open droppedItems
 		-- run.sh をバックグラウンドで起動し、PID を受け取って自分でポーリングする。
 		-- これで do shell script の暗黙のタイムアウト (2 分) にもかからない。
 		try
-			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
+			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " " & quoted form of theTrim & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
 		on error errMsg
 			my removeFile(listPath)
 			my removeDir(workDir)
@@ -305,7 +312,9 @@ on loadSettings()
 	if f is not in {"webp", "avif", "jpeg", "png"} then set f to defaultFormat
 	set o to my readPref("originalAction", defaultOriginal)
 	if o is not in {"trash", "keep"} then set o to defaultOriginal
-	return {quality:q, fmt:f, orig:o}
+	set t to my readPref("trimPadding", defaultTrim)
+	if t is not in {"on", "off"} then set t to defaultTrim
+	return {quality:q, fmt:f, orig:o, trim:t}
 end loadSettings
 
 -- 0〜100 の整数、または lossless だけを通す。"85.5" や "０" のような
