@@ -18,10 +18,11 @@ on:
 permissions:
   contents: read
 
-# 同じブランチで新しい push があったら古いランを打ち切る。
+# 同じ PR に新しい push があったら古いランを打ち切る。main では打ち切らない
+# (連続してマージしたとき、先のマージコミットが緑を持たないまま残るため)。
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -30,6 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # webp (cwebp) は今の lint / build では呼ばれない。変換テスト (#14 / #15)
+      # が入ったときに要るので先に入れてある。使っていないからと消さないこと。
       - name: 依存をインストール
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
