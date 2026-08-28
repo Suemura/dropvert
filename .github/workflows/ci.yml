@@ -1,0 +1,77 @@
+name: CI
+
+# lint と build を自動実行する。ランナーが macos-latest なのは、sips / osacompile /
+# codesign / PlistBuddy が macOS にしか無いため。
+#
+# 変換・ドロップ・ゴミ箱移動の自動テスト (./tests/run.sh) はまだ無い。
+# テストハーネスができたら test ステップを足すこと (#14 / #15)。
+# CI で自動化できない層 (実際のドロップ、進捗ウィンドウ、停止ボタン、
+# 設定ウィンドウの見た目) は CLAUDE.md「テスト方法」の手動チェックリストを参照。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# 同じブランチで新しい push があったら古いランを打ち切る。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 依存をインストール
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: brew install --formula webp shellcheck shfmt
+
+      # lint.sh は shellcheck / shfmt が無ければ SKIP して exit 0 を返す
+      # (ローカルで brew を必須にしないための仕様)。CI でそれをやると
+      # 「入っていないから緑」になってしまうため、先に存在を確かめる。
+      - name: ツールの存在を確認
+        run: command -v cwebp shellcheck shfmt
+
+      - name: lint
+        run: |
+          status=0
+          ./lint.sh >"$RUNNER_TEMP/lint.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/lint.log"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          # 上の確認ステップを通っていれば起きないが、二重の歯止め。
+          if grep -q '^SKIP' "$RUNNER_TEMP/lint.log"; then
+            echo "::error::lint の一部が SKIP されました" >&2
+            exit 1
+          fi
+
+      - name: build
+        run: ./build.sh "$RUNNER_TEMP/out"
+
+      - name: 署名を検証
+        run: codesign --verify --deep --strict "$RUNNER_TEMP/out/Dropvert.app"
+
+      # ▼ 一時的な調査ステップ (#16)。GUI セッションを持たないランナーで
+      # NSFileManager の trashItemAtURL が動くかどうかを実測する。
+      # 結果を CLAUDE.md に記録したら、このステップは削除すること。
+      - name: 調査 — headless での trashItemAtURL
+        run: |
+          probe="$RUNNER_TEMP/trash-probe.txt"
+          echo probe >"$probe"
+          out=$(osascript -l JavaScript trash.js "$probe" 2>&1) || true
+          printf 'stdout=[%s]\n' "$out"
+          if [ -e "$probe" ]; then
+            echo "結果: 元ファイルが残っている → ゴミ箱への移動は失敗"
+          else
+            echo "結果: 元ファイルが消えた → ゴミ箱への移動は成功"
+          fi
+          ls -la "$HOME/.Trash" || echo "ホームディレクトリに .Trash が無い"
