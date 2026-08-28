@@ -10,7 +10,7 @@
 #
 # 出力(stdout): タブ区切りのサマリ行のみ。
 #   TMP<TAB><作業ディレクトリ>            必ず 1 行。呼び出し側が使い終わったら削除する
-#   CONVERTED<TAB><件数>                  必ず 1 行
+#   CONVERTED<TAB><件数>                  必ず 1 行 (入力リストが見つからない場合を除く)
 #   SKIPPED<TAB><件数>                    必ず 1 行。変換の対象外だったもの (.webp など)
 #   UNPROCESSED<TAB><件数>                必ず 1 行。cancel で着手しなかったもの
 #   LIST<TAB><パス>                       成功が 1 件以上のときのみ。成功した「元ファイル」の
@@ -60,6 +60,8 @@ mark_done() { : >"$tmp/exit" 2>/dev/null || true; }
 trap mark_done EXIT
 
 if [ ! -f "$listfile" ]; then
+	# ここだけは 3 つのカウンタを出さずに終わる。呼び出し側 (AppleScript) は
+	# パースの前に 0 で初期化するので実害は無い。
 	printf 'FAIL\t-\t入力リストが見つからない\n'
 	exit 0
 fi
