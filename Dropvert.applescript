@@ -27,12 +27,18 @@ on run
 	end try
 	-- バックグラウンド起動そのものは失敗を返さない (シェルは即座に 0 を返す)。
 	-- 起動できずに終わったことに気づけないと「ダブルクリックしても無反応」に
-	-- なってしまうので、終了コードを一時ファイルに書かせて少しだけ様子を見る。
-	-- 正常に開けばプロセスは生き続け、ファイルは空のまま。
+	-- なってしまうので、失敗したときだけ終了コードを一時ファイルに書かせ、
+	-- 少しだけ様子を見る。
+	--
+	-- 正常に終わったときは何も書かない。ここで待つのは 0.7 秒だけで、設定
+	-- ウィンドウはそのあとも開かれ続けるため、「終了時に必ず書く」形にすると
+	-- 消したはずの一時ファイルがウィンドウを閉じたときに作り直されてしまう。
+	-- 既に開いていて二重起動をやめた場合 (終了コード 0) も書かれないので、
+	-- ファイルが空かどうかだけを見ればよい。
 	set statusPath to ""
 	try
 		set statusPath to do shell script "/usr/bin/mktemp -t dropvert-prefs"
-		do shell script "( " & quoted form of prefsPath & " >/dev/null 2>&1; echo $? >" & quoted form of statusPath & " ) >/dev/null 2>&1 </dev/null &"
+		do shell script "( " & quoted form of prefsPath & " >/dev/null 2>&1 || echo $? >" & quoted form of statusPath & " ) >/dev/null 2>&1 </dev/null &"
 	on error errMsg number errNum
 		my removeFile(statusPath)
 		if errNum is -128 then return
@@ -48,9 +54,7 @@ on run
 		set launchStatus to do shell script "/bin/cat " & quoted form of statusPath
 	end try
 	my removeFile(statusPath)
-	-- 空 = まだ動いている (正常)。0 = すぐ終わったが正常 (既に開いていて
-	-- そちらに任せた場合)。それ以外は起動に失敗している。
-	if launchStatus is not "" and launchStatus is not "0" then
+	if launchStatus is not "" then
 		display alert "設定画面を開けません" message "設定画面を起動できませんでした（終了コード " & launchStatus & "）。build.sh で再ビルドしてください。" as critical
 	end if
 end run

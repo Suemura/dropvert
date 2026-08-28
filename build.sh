@@ -28,7 +28,10 @@ build_tmp=$(mktemp -d -t dropvert-build)
 trap 'rm -rf "$build_tmp"' EXIT
 
 # 配布用ではなくローカルビルドなので、universal 化はせずネイティブのみ。
-"$swiftc_bin" "${swiftc_sdk[@]}" -O -o "$build_tmp/Prefs" "$src_dir/Prefs.swift"
+# 配列の展開が ${arr[@]+"${arr[@]}"} なのは、bash 3.2 の set -u では
+# 空配列の "${arr[@]}" が unbound variable になるため (swiftc がそのまま
+# 使える環境では swiftc_sdk が空になる)。
+"$swiftc_bin" ${swiftc_sdk[@]+"${swiftc_sdk[@]}"} -O -o "$build_tmp/Prefs" "$src_dir/Prefs.swift"
 
 mkdir -p "$dest_dir"
 rm -rf "$app"
