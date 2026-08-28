@@ -208,7 +208,7 @@ webp)
 		qflag=(-q "$q")
 	fi
 	case "$ext" in
-	png | jpg | jpeg | jpe | tif | tiff)
+	png | jpg | jpeg | jpe)
 		err=$(cwebp -quiet "${qflag[@]}" ${cropwebp[@]+"${cropwebp[@]}"} -metadata icc "$src" -o "$out" 2>&1) || true
 		;;
 	gif)
@@ -219,7 +219,11 @@ webp)
 		fi
 		;;
 	*)
-		# heic/avif/bmp/psd/jxl など: sips で PNG に中間変換してから cwebp
+		# heic/avif/bmp/psd/jxl/tiff など: sips で PNG に中間変換してから cwebp
+		#
+		# TIFF もここを通す。macOS のツール (sips や Preview) が書き出す TIFF は
+		# タイル形式で、cwebp が読めない ("TIFF tile dimension (512 x 512) is
+		# too large.")。sips を通せばタイルでもストリップでも読める。
 		#
 		# 切り出しは cwebp ではなく前段の sips に付ける。矩形は元ファイルを
 		# 測って得たものなので、それを読むツールに渡すのが確実で、中間変換が
