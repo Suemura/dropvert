@@ -7,15 +7,10 @@ src_dir=$(cd "$(dirname "$0")" && pwd)
 dest_dir="${1:-$HOME/Applications}"
 app="$dest_dir/Dropvert.app"
 
-# Swift 製の同梱物 (設定ウィンドウ Prefs と、余白を測る Trim) を先にコンパイルする。
-# 既存のアプリを消す前に済ませておけば、コンパイルに失敗しても手元のアプリを
-# 壊さずに終われる。
-#
-# xcode-select が Xcode を指していてライセンス未同意の場合、/usr/bin/swiftc も
-# xcrun も落ちる。Command Line Tools の swiftc は使えるが、xcrun 経由で SDK を
-# 解決できないぶん -sdk を明示する必要がある。
 # バージョン番号の唯一の出どころ。Homebrew cask の雛形にも同じ値が書いてあり、
-# ズレていないことは lint.sh が検査する (CLAUDE.md「バージョン番号」参照)。
+# ズレていないことは lint.sh が検査する (CLAUDE.md「ファイル構成と役割」の
+# VERSION の項を参照)。plist に書き込むのはここだけなので、形式の検証もここで
+# 行う (lint.sh を通さずに手で書き換えられても不正な値が入らないように)。
 # 読み込みと検証は既存の .app を消す前に済ませる (壊さずに失敗して終わるため)。
 version_file="$src_dir/VERSION"
 if [ ! -f "$version_file" ]; then
@@ -23,11 +18,18 @@ if [ ! -f "$version_file" ]; then
 	exit 1
 fi
 version=$(head -n 1 "$version_file" | tr -d '[:space:]')
-if [ -z "$version" ]; then
-	echo "VERSION が空です: $version_file" >&2
+if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+	echo "VERSION が SemVer (x.y.z) ではありません: '$version'" >&2
 	exit 1
 fi
 
+# Swift 製の同梱物 (設定ウィンドウ Prefs と、余白を測る Trim) を先にコンパイルする。
+# 既存のアプリを消す前に済ませておけば、コンパイルに失敗しても手元のアプリを
+# 壊さずに終われる。
+#
+# xcode-select が Xcode を指していてライセンス未同意の場合、/usr/bin/swiftc も
+# xcrun も落ちる。Command Line Tools の swiftc は使えるが、xcrun 経由で SDK を
+# 解決できないぶん -sdk を明示する必要がある。
 swiftc_bin=$(command -v swiftc || true)
 swiftc_sdk=()
 if [ -z "$swiftc_bin" ] || ! "$swiftc_bin" -version >/dev/null 2>&1; then

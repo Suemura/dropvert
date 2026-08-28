@@ -94,6 +94,8 @@ fi
 # 7. バージョン番号の整合。VERSION が唯一の出どころで、Homebrew cask の雛形が
 # それを写している。bundle identifier が 3 箇所に散って黙って不一致になった
 # 前例があるため (CLAUDE.md「設定」参照)、注意書きではなく機械で止める。
+# 形式の検証は build.sh にもある (plist へ書き込む直前の最後の砦)。こちらは
+# ビルドせずに気づけるようにするためのもので、cask との一致はここでしか見ない。
 check_version() {
 	local version_file="$here/VERSION" cask="$here/packaging/Casks/dropvert.rb"
 	if [ ! -f "$version_file" ]; then

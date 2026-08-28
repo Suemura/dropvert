@@ -222,15 +222,21 @@ push と Pull Request では GitHub Actions（`macos-latest`）が同じチェ�
 バージョン番号はリポジトリ直下の `VERSION` に置いています。この 1 ファイルが唯一の出どころで、`build.sh` がビルド時に `Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` へ書き込みます。Homebrew cask の雛形（`packaging/Casks/dropvert.rb`）も同じ値を持つため、`./lint.sh` が両者の一致を検査します（ズレていれば CI が落ちます）。
 
 ```sh
-# 1. バージョンを上げる（SemVer）
+# 1. バージョンを上げる（SemVer）ブランチを切る
+git switch -c chore/v0.2.0
 echo 0.2.0 > VERSION
 # 2. cask 雛形の version も同じ値にする
 # 3. 一致とビルドを確認する
 ./lint.sh && ./tests/run.sh && ./build.sh
-# 4. コミットしてタグを打つ
+# 4. PR を作ってマージする
 git commit -am "chore: v0.2.0"
-git tag v0.2.0 && git push origin main --tags
-# 5. GitHub Release を作る（tarball が自動で添付される）
+git push -u origin chore/v0.2.0
+gh pr create --base main --title "chore: v0.2.0" --body "バージョンを 0.2.0 に上げる"
+
+# 5. マージ後、main でタグを打つ
+git switch main && git pull
+git tag v0.2.0 && git push origin v0.2.0
+# 6. GitHub Release を作る（tarball が自動で添付される）
 gh release create v0.2.0 --generate-notes
 ```
 
