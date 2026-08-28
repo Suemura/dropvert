@@ -100,7 +100,7 @@ bash -n convert.sh && bash -n run.sh && bash -n build.sh
 
 ## テスト方法
 
-CI（`.github/workflows/ci.yml`、`macos-latest`）が push / PR ごとに自動で回すのは **`./lint.sh`・`./tests/run.sh`・ビルド + 署名検証**です。`convert.sh` を変更したら、手で試す前に `./tests/run.sh` を回してください（21 ケース、10 秒ほど）。
+CI（`.github/workflows/ci.yml`、`macos-latest`）が push / PR ごとに自動で回すのは **`./lint.sh`・`./tests/run.sh`・ビルド + 署名検証**です。`convert.sh` を変更したら、手で試す前に `./tests/run.sh` を回してください（22 ケース、10 秒ほど）。
 
 ```sh
 ./tests/run.sh                      # convert.sh 層の自動テスト

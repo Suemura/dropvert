@@ -16,7 +16,7 @@ conv="$repo/convert.sh"
 # 変換に要るコマンドが無ければ、テストだけ緑になる余地を作らずに落とす。
 # 複数の名前をまとめて command -v に渡さないこと。macOS の bash 3.2 は
 # 「どれか 1 つでも見つかれば 0」を返す。
-for tool in sips cwebp gif2webp; do
+for tool in sips cwebp gif2webp webpmux; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		echo "テストに必要なコマンドがありません: $tool (brew install webp)" >&2
 		exit 1
@@ -83,6 +83,12 @@ make_asset "$assets/base.gif" gif
 make_asset "$assets/base.heic" heic
 if ! cwebp -quiet -q 85 "$base" -o "$assets/base.webp" 2>/dev/null || [ ! -s "$assets/base.webp" ]; then
 	echo "テスト素材を作れませんでした: base.webp" >&2
+	exit 1
+fi
+# アニメーション WebP。同じコマ 2 枚でよい (見たいのは VP8X のフラグだけ)。
+if ! webpmux -frame "$assets/base.webp" +100 -frame "$assets/base.webp" +100 \
+	-o "$assets/anim.webp" >/dev/null 2>&1 || [ ! -s "$assets/anim.webp" ]; then
+	echo "テスト素材を作れませんでした: anim.webp" >&2
 	exit 1
 fi
 
@@ -244,18 +250,15 @@ case_output_png() {
 # (sips は formatOptions 100 / best を Error 13 で拒む)。
 case_quality_extremes() {
 	setup base.png
-	local q fmt ext out
+	local q fmt out
+	# webp と avif は拡張子が形式名と同じなので、そのまま使える。
 	for fmt in webp avif; do
-		case "$fmt" in
-		webp) ext=webp ;;
-		avif) ext=avif ;;
-		esac
 		for q in lossless 100 0; do
 			mkdir -p "$case_dir/$fmt-$q"
 			cp "$assets/base.png" "$case_dir/$fmt-$q/base.png"
 			out=$("$conv" "$case_dir/$fmt-$q/base.png" "$q" "$fmt")
-			assert_eq "$case_dir/$fmt-$q/base.$ext" "$out" "$fmt 品質 $q の出力パス"
-			assert_image "$case_dir/$fmt-$q/base.$ext" "$fmt"
+			assert_eq "$case_dir/$fmt-$q/base.$fmt" "$out" "$fmt 品質 $q の出力パス"
+			assert_image "$case_dir/$fmt-$q/base.$fmt" "$fmt"
 		done
 	done
 	rm -f "$case_dir/base.png"
@@ -288,6 +291,38 @@ case_skip_same_format() {
 	assert_eq "SKIP" "$("$conv" "$case_dir/base.png" 85 png)" "png 入力 → png"
 	# SKIP なので新しいファイルは 1 つも作られない
 	assert_dir_exactly "$case_dir" base.webp base.jpg base.jpeg base.jpe base.png
+}
+
+# アニメーション WebP を同じ形式へ書き戻さないこと。
+# この経路は sips で PNG に中間変換するため 1 フレームに潰れる。潰れた出力を
+# 「変換成功」と扱うと、アニメーションが失われたまま元ファイルがゴミ箱へ行く。
+#
+# この判定に届くのは「同じ形式 + 削れる余白あり」のときだけで、余白の測定には
+# Trim が要る。ソースツリーには Trim が無いので、矩形を返すだけのスタブを置いた
+# コピーを作って呼ぶ (convert.sh は自分と同じディレクトリの Trim を見る)。
+# スタブを置かないと手前の「同じ形式は SKIP」で止まり、判定を壊しても
+# 気づけないテストになる。
+case_animated_webp_is_skipped() {
+	setup anim.webp base.webp
+	local sandbox out
+	sandbox="$case_dir/bin"
+	mkdir -p "$sandbox"
+	cp "$conv" "$sandbox/convert.sh"
+	printf '#!/bin/sh\necho "10 10 200 100 240 135"\n' >"$sandbox/Trim"
+	chmod +x "$sandbox/Trim"
+
+	# まずスタブが効いていることを確かめる。静止画の webp は「余白あり」と
+	# 見なされて再エンコードされるはず。ここが SKIP なら、下の判定は
+	# アニメーションとは無関係に通ってしまう。
+	out=$("$sandbox/convert.sh" "$case_dir/base.webp" 85 webp 1)
+	assert_eq "$case_dir/base-1.webp" "$out" "(前提) 静止画 webp は余白があれば再エンコードされる"
+
+	# 本題。同じ条件でもアニメーションなら SKIP でなければならない。
+	assert_eq "SKIP" "$("$sandbox/convert.sh" "$case_dir/anim.webp" 85 webp 1)" \
+		"アニメーション webp はトリム有効でも SKIP"
+	# トリムが無効なら、そもそも同じ形式なので SKIP
+	assert_eq "SKIP" "$("$conv" "$case_dir/anim.webp" 85 webp)" "アニメーション webp → webp"
+	assert_dir_exactly "$case_dir" anim.webp base.webp base-1.webp bin
 }
 
 case_unknown_format() {
@@ -328,6 +363,11 @@ case_tricky_file_names() {
 		assert_eq "$case_dir/${name%.png}.webp" "$out" "[$name] の出力パス"
 		assert_image "$case_dir/${name%.png}.webp" webp
 	done
+	# 採番も残骸の後始末も、この手の名前で壊れやすい
+	assert_dir_exactly "$case_dir" base.png \
+		"with space.png" "with space.webp" \
+		"日本語.png" "日本語.webp" \
+		"絵文字🎨.png" "絵文字🎨.webp"
 }
 
 # 同じ出力名を狙う入力が同じディレクトリにある場合、採番で退避すること
@@ -406,6 +446,7 @@ cases=(
 	case_quality_extremes
 	case_quality_invalid
 	case_skip_same_format
+	case_animated_webp_is_skipped
 	case_unknown_format
 	case_bad_arguments
 	case_folder_is_rejected
