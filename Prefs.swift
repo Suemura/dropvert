@@ -127,7 +127,11 @@ enum L {
 
 final class Store {
 	private let defaults: UserDefaults
-	private var pending: DispatchWorkItem?
+	/// 遅延中の書き込み。値そのものを持つ。DispatchWorkItem に持たせて
+	/// flush で perform する形にはできない (cancel 済みの work item は
+	/// perform しても本体が実行されず、書き込みが黙って消える)。
+	private var pendingWrite: (key: String, value: String)?
+	private var timer: DispatchWorkItem?
 
 	init?() {
 		guard let d = UserDefaults(suiteName: Pref.domain) else { return nil }
@@ -139,37 +143,44 @@ final class Store {
 	}
 
 	func write(_ key: String, _ value: String) {
-		pending?.cancel()
-		pending = nil
+		if pendingWrite?.key == key {
+			cancelPending()
+		}
 		defaults.set(value, forKey: key)
 	}
 
 	/// スライダーのドラッグ中に毎イベント書き込まないための遅延書き込み。
 	/// 表示はイベントごとに更新し、保存だけを間引く。
 	func writeDebounced(_ key: String, _ value: String) {
-		pending?.cancel()
-		let work = DispatchWorkItem { [weak self] in
-			self?.defaults.set(value, forKey: key)
-		}
-		pending = work
+		pendingWrite = (key, value)
+		timer?.cancel()
+		let work = DispatchWorkItem { [weak self] in self?.flush() }
+		timer = work
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
 	}
 
-	/// 遅延中の書き込みを今すぐ実行する。閉じるときに取りこぼさないため。
+	/// 遅延中の書き込みを今すぐ実行する。ウィンドウを閉じるときと
+	/// アプリの終了時に呼び、最後の 1 回を取りこぼさないため。
 	func flush() {
-		guard let work = pending else { return }
-		work.cancel()
-		pending = nil
-		work.perform()
+		timer?.cancel()
+		timer = nil
+		guard let write = pendingWrite else { return }
+		pendingWrite = nil
+		defaults.set(write.value, forKey: write.key)
 	}
 
 	/// 保存した設定をすべて消す。plist が無い状態 (= 既定値) に戻る。
 	func resetAll() {
-		pending?.cancel()
-		pending = nil
+		cancelPending()
 		for key in Pref.allKeys {
 			defaults.removeObject(forKey: key)
 		}
+	}
+
+	private func cancelPending() {
+		timer?.cancel()
+		timer = nil
+		pendingWrite = nil
 	}
 }
 
@@ -500,6 +511,7 @@ enum SingleInstance {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 	private var controller: PrefsWindowController?
+	private var store: Store?
 	private var keyMonitor: Any?
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
@@ -507,6 +519,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			FileHandle.standardError.write("設定を読み書きできません (\(Pref.domain))\n".data(using: .utf8)!)
 			exit(1)
 		}
+		self.store = store
 		let controller = PrefsWindowController(store: store)
 		self.controller = controller
 		controller.show()
@@ -533,6 +546,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	}
 
 	func applicationWillTerminate(_ notification: Notification) {
+		// ⌘Q での終了ではウィンドウの windowWillClose が呼ばれない。
+		// ここで念を押しておかないと、遅延中の書き込みが消える。
+		store?.flush()
 		if let monitor = keyMonitor {
 			NSEvent.removeMonitor(monitor)
 		}
