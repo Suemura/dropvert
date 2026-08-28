@@ -47,6 +47,7 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
 
   出力形式と同じ形式の入力は、削れる余白があるときだけ変換する（切り出しのための再エンコード）。この判定があるため、`Trim` の呼び出しは `SKIP` の判定より**前**に置いてある。**アニメーション WebP は同形式では常に `SKIP`** する（この経路は `sips` で PNG に中間変換するため 1 フレームに潰れ、アニメーションが失われた出力で元ファイルがゴミ箱へ行ってしまう）
 - `build.sh` — `Prefs.swift` と `Trim.swift` を `swiftc` でコンパイルし、`osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` / `Prefs` / `Trim` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleIdentifier`（設定の保存先ドメイン）と `CFBundleDocumentTypes`（`public.image`）を設定し、**最後に ad-hoc 署名を付け直す**。Swift のコンパイルは既存の `.app` を消す前に行う（失敗しても手元のアプリを壊さないため）
+- `lint.sh` — 静的チェックを 1 コマンドにまとめた開発用スクリプト。`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` を実行する。検査のみで、変換・削除・ビルドには関与せず、bundle にも同梱しない。shellcheck / shfmt が未インストールの環境では該当の層を `SKIP` して exit 0 を保つ（必須の開発依存を増やさないため）
 
 ## 設定（`defaults`）
 
@@ -81,7 +82,7 @@ stdout の契約は 2 段になっています。`convert.sh` の 1 行契約は
 
 ビルドは既存の `.app` を削除してから作り直します。ソースを編集したら必ず再ビルドしてください。**アプリ内の `convert.sh` を直接編集しても、次のビルドで上書きされます。**
 
-構文チェックのみ行う場合:
+構文チェックのみ行う場合は `./lint.sh` を使います（`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` をまとめて実行。shellcheck / shfmt は `brew install shellcheck shfmt`、無ければ `SKIP`）。個別に実行する場合:
 
 ```sh
 osacompile -o /dev/null Dropvert.applescript
@@ -253,6 +254,7 @@ defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 - **アニメーション WebP の判定に `ANIM` チャンクを探してはいけません**。手前に ICC プロファイル（`ICCP`）が入っていると位置が後ろへずれます（実測: ICC 無しなら 30 バイト目、`sRGB Profile.icc` を付けると 3182 バイト目）。先頭だけを読む実装だとアニメーションを静止画と読み違え、**1 フレームに潰れた出力で元ファイルが削除されます**。`VP8X`（12 バイト目）の存在と、20 バイト目のフラグの `0x02` を見てください。この位置は固定です
 - **失敗アラートが出ている間、次のドロップは処理されません**。アプレットは一度に 1 つのイベントしか扱えないため、アラートを閉じるまでアプリが生き続け、その間の `open -a` は取りこぼされます。連続してドロップする自動テストを組むときは、壊れたファイルを混ぜないか、1 回ごとにアプリの終了を待ってください（ゴミ箱への移動はアラートより前に済んでいるので、元ファイルの扱いは正しく行われます）
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
+- **シェルのコメントの最初の単語を `shellcheck` にしないでください**。shellcheck はコメント先頭の `shellcheck` を directive として解釈しようとし、続きが `key=value` の形でないと SC1073 / SC1072 のエラーになります（日本語の説明文でも同様）。また directive 行に `--` などで理由を続けて書くのも同じエラーになります。disable の理由は directive の**前の行**に、`shellcheck` という単語を行頭以外に置いて書いてください（`lint.sh` と `run.sh` で実際に 2 回踏んだ罠です）
 
 ## 開発ハーネス（`.claude/`）
 

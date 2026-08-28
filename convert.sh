@@ -20,9 +20,18 @@ esac
 here=$(cd "$(dirname "$0")" && pwd)
 trimbin="$here/Trim"
 
-if [ -z "$src" ]; then echo "FAIL:引数なし"; exit 0; fi
-if [ -d "$src" ]; then echo "FAIL:フォルダはスキップ"; exit 0; fi
-if [ ! -f "$src" ]; then echo "FAIL:ファイルが存在しない"; exit 0; fi
+if [ -z "$src" ]; then
+	echo "FAIL:引数なし"
+	exit 0
+fi
+if [ -d "$src" ]; then
+	echo "FAIL:フォルダはスキップ"
+	exit 0
+fi
+if [ ! -f "$src" ]; then
+	echo "FAIL:ファイルが存在しない"
+	exit 0
+fi
 
 # 品質の防御。呼び出し側の検証をすり抜けても既定値で動かす。
 case "$q" in
@@ -115,6 +124,9 @@ if [ "$trim" = "1" ] && [ "$ext" != "gif" ] && [ -x "$trimbin" ]; then
 	# "x y w h 元の幅 元の高さ" 以外 (NONE / FAIL: / 想定外) はトリムなし。
 	# 単語に割るあいだだけ glob を止める (理由の文字列が展開されないように)。
 	set -f
+	# 単語分割は意図的で、6 個の位置パラメータに割るのが目的。クォートすると
+	# 1 個の文字列になって壊れる。glob は上の set -f で止めてある。
+	# shellcheck disable=SC2086
 	set -- $rect
 	set +f
 	if [ "$#" -eq 6 ]; then
@@ -146,7 +158,10 @@ if [ "$sameformat" = "1" ] && [ "${#cropwebp[@]}" -eq 0 ]; then
 	echo "SKIP"
 	exit 0
 fi
-if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
+if [ ! -w "$dir" ]; then
+	echo "FAIL:書き込み権限なし"
+	exit 0
+fi
 
 tmpdir=""
 out=""
@@ -169,7 +184,10 @@ while [ "$i" -le 999 ]; do
 	else
 		cand="$dir/$name-$i.$outext"
 	fi
-	if (set -o noclobber; : >"$cand") 2>/dev/null; then
+	if (
+		set -o noclobber
+		: >"$cand"
+	) 2>/dev/null; then
 		out="$cand"
 		break
 	fi

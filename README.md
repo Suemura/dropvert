@@ -158,6 +158,8 @@ dropvert/
 ├── convert.sh            # 1 ファイルを変換するロジック
 ├── trash.js              # ゴミ箱へ移動する JXA スクリプト
 ├── build.sh              # アプリをビルドし、ad-hoc 署名を付け直す
+├── lint.sh               # 静的チェック（開発用。アプリには同梱されない）
+├── .editorconfig
 ├── README.md
 ├── CLAUDE.md
 └── LICENSE
@@ -186,6 +188,20 @@ ls ~/Pictures/*.png > /tmp/list.txt
 ```
 
 標準出力はタブ区切りのサマリのみで、変換した件数・スキップ件数・失敗の一覧と、成功した元ファイルのパスを並べたリストのパスを返します。元ファイルの削除はここでも行いません（元の名前へ戻すリネームも、ゴミ箱への移動を担当する droplet 側の仕事です）。
+
+## 開発
+
+コードを変更する場合は、静的チェックを 1 コマンドで実行できます。
+
+```sh
+./lint.sh
+```
+
+シェルスクリプトの構文チェック（`bash -n`）、AppleScript / JXA（`osacompile`）、Swift（`swiftc -typecheck`）は追加インストールなしで動きます。shellcheck と shfmt によるチェックも行うには、次をインストールしてください（未インストールの場合、その項目は `SKIP` と表示されます）。
+
+```sh
+brew install shellcheck shfmt
+```
 
 ## 名前について
 
