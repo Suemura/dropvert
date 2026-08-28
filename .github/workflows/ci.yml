@@ -40,7 +40,12 @@ jobs:
       # (ローカルで brew を必須にしないための仕様)。CI でそれをやると
       # 「入っていないから緑」になってしまうため、先に存在を確かめる。
       - name: ツールの存在を確認
-        run: command -v cwebp shellcheck shfmt
+        run: |
+          # macOS の bash は 3.2 で、command -v に複数の名前を渡すと
+          # 「どれか 1 つでも見つかれば 0」を返す。1 つずつ確かめること。
+          for tool in cwebp shellcheck shfmt; do
+            command -v "$tool" || exit 1
+          done
 
       - name: lint
         run: |
