@@ -295,17 +295,15 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 		formatPopUp = makePopUp(Pref.format, store) { [weak self] _ in
 			self?.refreshQualityUI()
 		}
-		let accessory = NSTitlebarAccessoryViewController()
-		let holder = NSView()
+		// タイトルバーのアクセサリは frame でサイズを与える。素の NSView は
+		// intrinsic size を持たないため、制約だけ書くと幅 0 に潰れて何も見えない。
+		formatPopUp.sizeToFit()
+		let popUpWidth = max(formatPopUp.frame.width, 110)
+		let holder = NSView(frame: NSRect(x: 0, y: 0, width: popUpWidth + 12, height: 30))
+		formatPopUp.frame = NSRect(x: 0, y: 2, width: popUpWidth, height: 25)
 		holder.addSubview(formatPopUp)
-		formatPopUp.translatesAutoresizingMaskIntoConstraints = false
-		NSLayoutConstraint.activate([
-			formatPopUp.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
-			formatPopUp.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -8),
-			formatPopUp.topAnchor.constraint(equalTo: holder.topAnchor, constant: 2),
-			formatPopUp.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -2),
-			formatPopUp.widthAnchor.constraint(greaterThanOrEqualToConstant: 110),
-		])
+
+		let accessory = NSTitlebarAccessoryViewController()
 		accessory.view = holder
 		accessory.layoutAttribute = .right
 		window.addTitlebarAccessoryViewController(accessory)
