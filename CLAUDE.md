@@ -48,7 +48,7 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
   出力形式と同じ形式の入力は、削れる余白があるときだけ変換する（切り出しのための再エンコード）。この判定があるため、`Trim` の呼び出しは `SKIP` の判定より**前**に置いてある。**アニメーション WebP は同形式では常に `SKIP`** する（この経路は `sips` で PNG に中間変換するため 1 フレームに潰れ、アニメーションが失われた出力で元ファイルがゴミ箱へ行ってしまう）
 - `build.sh` — `Prefs.swift` と `Trim.swift` を `swiftc` でコンパイルし、`osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` / `Prefs` / `Trim` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleIdentifier`（設定の保存先ドメイン）と `CFBundleDocumentTypes`（`public.image`）を設定し、**最後に ad-hoc 署名を付け直す**。Swift のコンパイルは既存の `.app` を消す前に行う（失敗しても手元のアプリを壊さないため）
 - `lint.sh` — 静的チェックを 1 コマンドにまとめた開発用スクリプト。`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` を実行する。検査のみで、変換・削除・ビルドには関与せず、bundle にも同梱しない。shellcheck / shfmt が未インストールの環境では該当の層を `SKIP` して exit 0 を保つ（必須の開発依存を増やさないため）
-- `tests/run.sh` — `convert.sh` 層（1 ファイルの変換）の自動テスト。素の bash で書き、テストフレームワークは使わない。素材も出力も `mktemp -d` した作業ディレクトリの中だけに作り、**利用者の実ファイルには触れない**。素材は 1 枚の PNG（標準の壁紙、無ければ埋め込みの 8x8 PNG）から `sips` で各形式へ派生させる。1 件でも失敗すれば非 0 で終了する。`DROPVERT_TEST_KEEP=1` を付けると作業ディレクトリを残す。**`run.sh` 層（並列実行とサマリの契約）のテストはまだ無い**
+- `tests/run.sh` — `convert.sh` 層（1 ファイルの変換）の自動テスト。素の bash で書き、テストフレームワークは使わない。素材も出力も `mktemp -d` した作業ディレクトリの中だけに作り、**利用者の実ファイルには触れない**。素材は 1 枚の PNG（標準の壁紙、無ければ埋め込みの 8x8 PNG）から `sips` で各形式へ派生させる（アニメーション WebP だけは `webpmux` で作る。`brew install webp` に含まれる）。1 件でも失敗すれば非 0 で終了する。`DROPVERT_TEST_KEEP=1` を付けると作業ディレクトリを残す。**`run.sh` 層（並列実行とサマリの契約）のテストはまだ無い**
 
 ## 設定（`defaults`）
 

@@ -209,6 +209,8 @@ brew install shellcheck shfmt
 ./tests/run.sh
 ```
 
+実行には `webp`（`cwebp` / `gif2webp` / `webpmux`）が必要です。Dropvert を使うためにインストール済みのはずですが、入っていなければ `brew install webp` を実行してください。
+
 push と Pull Request では GitHub Actions（`macos-latest`）が同じチェックとテスト、ビルド・署名検証を自動で実行します。ドラッグ&ドロップの操作そのものは自動化されていないため、手元での確認が必要です。
 
 ## 名前について

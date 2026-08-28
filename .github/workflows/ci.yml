@@ -31,8 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # webp (cwebp) は今の lint / build では呼ばれない。変換テスト (#14 / #15)
-      # が入ったときに要るので先に入れてある。使っていないからと消さないこと。
+      # webp formula は cwebp / gif2webp / webpmux を持ってくる。3 つとも
+      # tests/run.sh が使う (webpmux はアニメーション WebP の素材作り)。
       - name: 依存をインストール
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
@@ -46,7 +46,7 @@ jobs:
         run: |
           # macOS の bash は 3.2 で、command -v に複数の名前を渡すと
           # 「どれか 1 つでも見つかれば 0」を返す。1 つずつ確かめること。
-          for tool in cwebp shellcheck shfmt; do
+          for tool in cwebp gif2webp webpmux shellcheck shfmt; do
             command -v "$tool" || exit 1
           done
 

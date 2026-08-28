@@ -23,7 +23,9 @@ for tool in sips cwebp gif2webp webpmux; do
 	fi
 done
 
-work=$(mktemp -d -t dropvert-test)
+work=$(mktemp -d -t dropvert-test) || exit 1
+# 空のまま進むと、この下の "$work/assets" が /assets になってしまう
+[ -n "$work" ] || exit 1
 cleanup() {
 	[ -n "$work" ] || return 0
 	# 書き込み権限のテストで 555 にしたディレクトリも消せるようにする
@@ -190,6 +192,7 @@ case_jpeg_to_webp() {
 	out=$("$conv" "$case_dir/base.jpg" 85)
 	assert_eq "$case_dir/base.webp" "$out" "出力パス"
 	assert_image "$case_dir/base.webp" webp
+	assert_dir_exactly "$case_dir" base.jpg base.webp
 }
 
 # 拡張子の大文字小文字を区別しないこと
@@ -206,6 +209,8 @@ case_tiff_to_webp() {
 	out=$("$conv" "$case_dir/base.tiff" 85)
 	assert_eq "$case_dir/base.webp" "$out" "出力パス"
 	assert_image "$case_dir/base.webp" webp
+	# 中間変換の一時ファイルが漏れていないことも見る
+	assert_dir_exactly "$case_dir" base.tiff base.webp
 }
 
 # GIF は gif2webp が担当する (cwebp では読めない)
@@ -214,6 +219,7 @@ case_gif_to_webp() {
 	out=$("$conv" "$case_dir/base.gif" 85)
 	assert_eq "$case_dir/base.webp" "$out" "出力パス"
 	assert_image "$case_dir/base.webp" webp
+	assert_dir_exactly "$case_dir" base.gif base.webp
 }
 
 # HEIC は sips で PNG に中間変換してから cwebp に渡す経路
@@ -230,6 +236,7 @@ case_output_avif() {
 	out=$("$conv" "$case_dir/base.png" 85 avif)
 	assert_eq "$case_dir/base.avif" "$out" "出力パス"
 	assert_image "$case_dir/base.avif" avif
+	assert_dir_exactly "$case_dir" base.png base.avif
 }
 
 case_output_jpeg() {
@@ -237,6 +244,7 @@ case_output_jpeg() {
 	out=$("$conv" "$case_dir/base.png" 85 jpeg)
 	assert_eq "$case_dir/base.jpg" "$out" "出力パス"
 	assert_image "$case_dir/base.jpg" jpeg
+	assert_dir_exactly "$case_dir" base.png base.jpg
 }
 
 case_output_png() {
@@ -244,12 +252,13 @@ case_output_png() {
 	out=$("$conv" "$case_dir/base.jpg" 85 png)
 	assert_eq "$case_dir/base.png" "$out" "出力パス"
 	assert_image "$case_dir/base.png" png
+	assert_dir_exactly "$case_dir" base.jpg base.png
 }
 
 # lossless / 100 / 0。AVIF の 100 と lossless は 99 に丸める経路を通る
 # (sips は formatOptions 100 / best を Error 13 で拒む)。
 case_quality_extremes() {
-	setup base.png
+	# 品質ごとにサブディレクトリを作って撒くので、case_dir 直下には何も置かない
 	local q fmt out
 	# webp と avif は拡張子が形式名と同じなので、そのまま使える。
 	for fmt in webp avif; do
@@ -261,12 +270,10 @@ case_quality_extremes() {
 			assert_image "$case_dir/$fmt-$q/base.$fmt" "$fmt"
 		done
 	done
-	rm -f "$case_dir/base.png"
 }
 
 # 呼び出し側の検証をすり抜けた不正な品質でも、既定値で変換できること
 case_quality_invalid() {
-	setup base.png
 	local q out
 	for q in abc 150 ""; do
 		mkdir -p "$case_dir/q"
@@ -276,7 +283,6 @@ case_quality_invalid() {
 		assert_image "$case_dir/q/base.webp" webp
 		rm -rf "$case_dir/q"
 	done
-	rm -f "$case_dir/base.png"
 }
 
 # 入力が出力形式と同じなら変換しない (トリムが無効なので必ず SKIP)
@@ -390,7 +396,14 @@ case_parallel_same_input() {
 	setup base.png
 	local out_list uniq total zero webps
 	out_list="$case_dir/stdout.txt"
-	seq 1 60 | xargs -P 12 -I{} "$conv" "$case_dir/base.png" 85 >"$out_list"
+	mkdir -p "$case_dir/outs"
+	# 60 プロセスの stdout を 1 つのファイルへ束ねない。行が混ざったとき、
+	# それを convert.sh の採番のバグと見分けられなくなるため。
+	# (子プロセスの bash が展開する位置引数なので、シングルクォートは意図的)
+	# shellcheck disable=SC2016
+	seq 1 60 | xargs -P 12 -I{} /bin/bash -c \
+		'"$1" "$2" 85 >"$3/{}"' _ "$conv" "$case_dir/base.png" "$case_dir/outs"
+	cat "$case_dir"/outs/* >"$out_list"
 	total=$(grep -c . "$out_list")
 	assert_eq "60" "$total" "出力の行数"
 	if grep -qE '^(FAIL|SKIP)' "$out_list"; then
