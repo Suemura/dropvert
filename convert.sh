@@ -33,7 +33,9 @@ esac
 
 # 出力形式ごとの取り決め:
 #   outext    生成するファイルの拡張子
-#   skipexts  入力がこれらの拡張子なら変換せず SKIP (同じ形式への変換は無意味)
+#   skipexts  入力がこれらの拡張子なら同じ形式とみなす。変換しても意味がないので
+#             原則 SKIP するが、余白トリムが有効で削れる余白があるときだけ、
+#             切り出しのために再エンコードする
 case "$fmt" in
 webp)
 	outext="webp"
@@ -62,13 +64,22 @@ base=$(basename "$src")
 name="${base%.*}"
 ext=$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]')
 
+# 出力形式と同じ形式の入力。変換しても意味がないので原則スキップするが、
+# 余白トリムが有効で削れる余白があるときだけ、切り出しのために再エンコードする。
+# 判定は余白を測ったあと (この下) で行う。
+sameformat=0
 case "$skipexts" in
-*" $ext "*)
+*" $ext "*) sameformat=1 ;;
+esac
+
+# アニメーション WebP を同じ形式へ書き戻さない。sips が 1 フレームに潰すため、
+# アニメーションが失われた出力で元ファイルがゴミ箱へ行ってしまう。
+# (別の形式への変換は従来どおり。1 フレームになるのは元からの挙動)
+if [ "$sameformat" = "1" ] && [ "$ext" = "webp" ] &&
+	head -c 64 "$src" 2>/dev/null | LC_ALL=C grep -q ANIM; then
 	echo "SKIP"
 	exit 0
-	;;
-esac
-if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
+fi
 
 # 余白の測定。切り出しそのものは後段のエンコーダ (cwebp / sips) に任せるので、
 # ここで作るのは渡すオプションだけ。中間ファイルは作らない。
@@ -113,6 +124,14 @@ if [ "$trim" = "1" ] && [ "$ext" != "gif" ] && [ -x "$trimbin" ]; then
 		fi
 	fi
 fi
+
+# 同じ形式への変換は、削れる余白があるときだけ意味がある。
+# 無いなら従来どおりスキップする (トリムが無効なときも必ずここに来る)。
+if [ "$sameformat" = "1" ] && [ "${#cropwebp[@]}" -eq 0 ]; then
+	echo "SKIP"
+	exit 0
+fi
+if [ ! -w "$dir" ]; then echo "FAIL:書き込み権限なし"; exit 0; fi
 
 tmpdir=""
 out=""
