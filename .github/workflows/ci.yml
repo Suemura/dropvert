@@ -1,10 +1,10 @@
 name: CI
 
-# lint と build を自動実行する。ランナーが macos-latest なのは、sips / osacompile /
-# codesign / PlistBuddy が macOS にしか無いため。
+# lint / test / build を自動実行する。ランナーが macos-latest なのは、sips /
+# osacompile / codesign / PlistBuddy が macOS にしか無いため。
 #
-# 変換・ゴミ箱移動の自動テスト (./tests/run.sh) はまだ無い。
-# テストハーネスができたら test ステップを足すこと (#14 / #15)。
+# tests/run.sh が見ているのは convert.sh 層 (1 ファイルの変換) だけ。
+# run.sh 層 (並列実行とサマリの契約) のテストは #15 で足すこと。
 # ゴミ箱への移動 (trash.js) は GUI セッションのないランナーでも動くことを
 # 実測済みなので、テストに含めてよい (CLAUDE.md「注意点」参照)。
 # CI で自動化できない層 (実際のドロップ、進捗ウィンドウ、停止ボタン、
@@ -63,6 +63,9 @@ jobs:
             echo "::error::lint の一部が SKIP されました" >&2
             exit 1
           fi
+
+      - name: test
+        run: ./tests/run.sh
 
       - name: build
         run: ./build.sh "$RUNNER_TEMP/out"

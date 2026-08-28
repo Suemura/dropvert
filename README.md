@@ -203,7 +203,13 @@ ls ~/Pictures/*.png > /tmp/list.txt
 brew install shellcheck shfmt
 ```
 
-push と Pull Request では GitHub Actions（`macos-latest`）が同じチェックとビルド・署名検証を自動で実行します。変換そのものやドロップ操作は自動化されていないため、手元での確認が必要です。
+変換のテストも 1 コマンドで実行できます。テスト素材と出力は一時ディレクトリの中だけに作られ、手元のファイルには触れません。
+
+```sh
+./tests/run.sh
+```
+
+push と Pull Request では GitHub Actions（`macos-latest`）が同じチェックとテスト、ビルド・署名検証を自動で実行します。ドラッグ&ドロップの操作そのものは自動化されていないため、手元での確認が必要です。
 
 ## 名前について
 

@@ -10,7 +10,13 @@
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
-shell_files=("$here/convert.sh" "$here/run.sh" "$here/build.sh" "$here/lint.sh")
+shell_files=(
+	"$here/convert.sh"
+	"$here/run.sh"
+	"$here/build.sh"
+	"$here/lint.sh"
+	"$here/tests/run.sh"
+)
 
 fail=0
 ok() { printf 'OK    %s\n' "$1"; }
@@ -36,7 +42,8 @@ run_check() {
 # ただし bash 3.2 の「set -u 下の空配列展開」は bash -n では検出できない
 # (実行して初めて落ちる)。CLAUDE.md「注意点」参照。
 for f in "${shell_files[@]}"; do
-	run_check "bash -n ${f##*/}" bash -n "$f"
+	# 表示はリポジトリ相対にする (run.sh と tests/run.sh を取り違えないため)
+	run_check "bash -n ${f#"$here"/}" bash -n "$f"
 done
 
 # 2. shellcheck (未インストールなら SKIP)

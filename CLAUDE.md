@@ -48,6 +48,7 @@ Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。
   出力形式と同じ形式の入力は、削れる余白があるときだけ変換する（切り出しのための再エンコード）。この判定があるため、`Trim` の呼び出しは `SKIP` の判定より**前**に置いてある。**アニメーション WebP は同形式では常に `SKIP`** する（この経路は `sips` で PNG に中間変換するため 1 フレームに潰れ、アニメーションが失われた出力で元ファイルがゴミ箱へ行ってしまう）
 - `build.sh` — `Prefs.swift` と `Trim.swift` を `swiftc` でコンパイルし、`osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` / `Prefs` / `Trim` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleIdentifier`（設定の保存先ドメイン）と `CFBundleDocumentTypes`（`public.image`）を設定し、**最後に ad-hoc 署名を付け直す**。Swift のコンパイルは既存の `.app` を消す前に行う（失敗しても手元のアプリを壊さないため）
 - `lint.sh` — 静的チェックを 1 コマンドにまとめた開発用スクリプト。`bash -n` / shellcheck / shfmt / `osacompile`（AppleScript と JXA）/ `swiftc -typecheck` を実行する。検査のみで、変換・削除・ビルドには関与せず、bundle にも同梱しない。shellcheck / shfmt が未インストールの環境では該当の層を `SKIP` して exit 0 を保つ（必須の開発依存を増やさないため）
+- `tests/run.sh` — `convert.sh` 層（1 ファイルの変換）の自動テスト。素の bash で書き、テストフレームワークは使わない。素材も出力も `mktemp -d` した作業ディレクトリの中だけに作り、**利用者の実ファイルには触れない**。素材は 1 枚の PNG（標準の壁紙、無ければ埋め込みの 8x8 PNG）から `sips` で各形式へ派生させる。1 件でも失敗すれば非 0 で終了する。`DROPVERT_TEST_KEEP=1` を付けると作業ディレクトリを残す。**`run.sh` 層（並列実行とサマリの契約）のテストはまだ無い**
 
 ## 設定（`defaults`）
 
@@ -99,11 +100,16 @@ bash -n convert.sh && bash -n run.sh && bash -n build.sh
 
 ## テスト方法
 
-CI（`.github/workflows/ci.yml`、`macos-latest`）が push / PR ごとに自動で回すのは **`./lint.sh` とビルド + 署名検証だけ**です。変換の自動テストはまだありません（テストハーネスができ次第 CI に足します）。
+CI（`.github/workflows/ci.yml`、`macos-latest`）が push / PR ごとに自動で回すのは **`./lint.sh`・`./tests/run.sh`・ビルド + 署名検証**です。`convert.sh` を変更したら、手で試す前に `./tests/run.sh` を回してください（21 ケース、10 秒ほど）。
+
+```sh
+./tests/run.sh                      # convert.sh 層の自動テスト
+DROPVERT_TEST_KEEP=1 ./tests/run.sh # 失敗を調べるとき（作業ディレクトリを残す）
+```
 
 次の層は CI では確認できません。**変更したら手で確かめてください。**
 
-- 変換そのもの（下記のケース一覧）— テストハーネスができるまでは手動
+- `run.sh` 層（並列実行・サマリの契約・作業ディレクトリの契約）— 自動テストはまだ無い
 - 実際のドラッグ&ドロップ（`odoc` イベント）と、進捗ウィンドウの「N / 全件 (X%)」の更新
 - 進捗ウィンドウの「停止」ボタンと、その連打時の後始末
 - `trash.js` を壊したアプリのコピーでの失敗検知
@@ -264,6 +270,7 @@ defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 - **アニメーション WebP の判定に `ANIM` チャンクを探してはいけません**。手前に ICC プロファイル（`ICCP`）が入っていると位置が後ろへずれます（実測: ICC 無しなら 30 バイト目、`sRGB Profile.icc` を付けると 3182 バイト目）。先頭だけを読む実装だとアニメーションを静止画と読み違え、**1 フレームに潰れた出力で元ファイルが削除されます**。`VP8X`（12 バイト目）の存在と、20 バイト目のフラグの `0x02` を見てください。この位置は固定です
 - **失敗アラートが出ている間、次のドロップは処理されません**。アプレットは一度に 1 つのイベントしか扱えないため、アラートを閉じるまでアプリが生き続け、その間の `open -a` は取りこぼされます。連続してドロップする自動テストを組むときは、壊れたファイルを混ぜないか、1 回ごとにアプリの終了を待ってください（ゴミ箱への移動はアラートより前に済んでいるので、元ファイルの扱いは正しく行われます）
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
+- **macOS のツールが書き出す TIFF はタイル形式で、`cwebp` が読めません**（`TIFF tile dimension (512 x 512) is too large.`）。`sips` や Preview で作った TIFF がこれに当たります。`convert.sh` は TIFF を `sips` で PNG に中間変換してから `cwebp` に渡す経路に回しています。`cwebp` へ直接渡す形に戻さないでください（タイルでもストリップでも読めるのは `sips` を通す経路だけです）
 - **`NSFileManager` の `trashItemAtURL` は GUI セッションがなくても動きます**。GitHub Actions の `macos-latest`（SSH セッションすら無い状態）で実測したところ、ファイルは `~/.Trash` へ移動し、`trash.js` は成功どおり 0 バイトを返しました。ゴミ箱への移動を CI のテストに含めても構いません（Finder への AppleEvent だったら権限が無くて動きません）
 - **`lint.sh` は shellcheck / shfmt が無いと `SKIP` して exit 0 を返します**。CI でそのまま使うと「入っていないから緑」になるため、ワークフロー側で `command -v` による存在確認と、ログに `SKIP` が出たら失敗させる歯止めを置いています。`lint.sh` 側に strict モードを足していないのは、ローカルでは brew を必須にしたくないためです
 - **シェルのコメントの最初の単語を `shellcheck` にしないでください**。shellcheck はコメント先頭の `shellcheck` を directive として解釈しようとし、続きが `key=value` の形でないと SC1073 / SC1072 のエラーになります（日本語の説明文でも同様）。また directive 行に `--` などで理由を続けて書くのも同じエラーになります。disable の理由は directive の**前の行**に、`shellcheck` という単語を行頭以外に置いて書いてください（`lint.sh` と `run.sh` で実際に 2 回踏んだ罠です）

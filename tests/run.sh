@@ -139,9 +139,16 @@ assert_dir_exactly() {
 	# <ディレクトリ> <期待するファイル名...>
 	local dir=$1
 	shift
-	local want got
+	local want got entry names
 	want=$(printf '%s\n' "$@" | sort)
-	got=$(ls -A "$dir" | sort)
+	# ls ではなく glob で集める。名前に空白や絵文字が入っても壊れない。
+	names=""
+	for entry in "$dir"/* "$dir"/.[!.]*; do
+		[ -e "$entry" ] || continue
+		names="$names${entry##*/}
+"
+	done
+	got=$(printf '%s' "$names" | sort)
 	if [ "$want" != "$got" ]; then
 		bad "ディレクトリの中身が違う: $dir"
 		bad "  期待: $(printf '%s' "$want" | tr '\n' ' ')"
