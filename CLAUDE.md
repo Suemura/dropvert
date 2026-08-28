@@ -4,37 +4,57 @@
 
 ## プロジェクト概要
 
-Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。AppleScript の droplet（`osacompile` でビルドした `.app`）と Bash スクリプトだけで構成されており、常駐プロセス・依存フレームワーク・設定 UI を持ちません。
+Dropvert は macOS 用のドラッグ&ドロップ画像コンバータです。AppleScript の droplet（`osacompile` でビルドした `.app`）と Bash スクリプト、それに設定ウィンドウ用の小さな Swift バイナリ（`Prefs.swift`）で構成されており、常駐プロセスも依存フレームワークも持ちません。
 
-現在の出力形式は WebP のみですが、**将来的に他の出力形式へ切り替えられるようにする予定**です。そのためプロジェクト名・ファイル名は形式非依存にしてあります（`convert.sh`、`Dropvert.app`）。WebP 固有の記述は品質設定と `case` 文の分岐に閉じ込めてください。
+出力形式は WebP / AVIF / JPEG / PNG から選べます（デフォルトは WebP）。形式固有の記述は品質のマッピングと `case` 文の分岐に閉じ込めてください。ファイル名・プロジェクト名は形式非依存です（`convert.sh`、`Dropvert.app`）。
 
 ## 設計上の原則
 
 この 3 点はプロジェクトの根幹であり、リファクタリングで壊してはいけません。
 
-1. **シンプルさが機能である** — 設定 UI、常時表示のウィンドウ、環境設定ファイルは追加しない。ドロップ以外の操作を増やさない。進行度表示は AppleScript アプレットが標準で出す進捗ウィンドウ（`progress` プロパティ）だけを使う。処理が終われば自動で消えるものに限る
+1. **設定を触らなくても使える** — デフォルト値だけで実用的に動く状態を保つ。設定はダブルクリック（`on run`）で開く 1 枚のウィンドウ（`Prefs.swift`）に収め、タブやセクション分けが必要になるほど項目を増やさない。保存ボタンは置かず、値を変えた瞬間に保存する。ドロップ時（`on open`）の操作は増やさない（設定画面を経由させない・変換前に確認を挟まない）。常駐プロセスや独自形式の設定ファイルは追加せず、保存先は `defaults`（`io.github.suemura.dropvert`）を使う。進行度表示は AppleScript アプレットが標準で出す進捗ウィンドウ（`progress` プロパティ）だけを使い、処理が終われば自動で消えるものに限る
 2. **元ファイルの削除は必ず検証の後** — 出力ファイルの存在とサイズ 0 でないことを確認して初めてゴミ箱へ移動する。`rm` は使わず `NSFileManager` の `trashItemAtURL` を使う（「元に戻す」を残す）。変換に失敗したファイルは絶対に削除しない
 3. **既存ファイルを上書きしない** — 出力名が衝突したら `-1`, `-2` … を付けて退避する
 
 ## ファイル構成と役割
 
-- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、入力パスを一時ファイルに書いて `run.sh` を **1 回だけ** バックグラウンドで起動し、進行度を表示しながら完了を待ち、成功分をまとめて `trash.js` に渡し、結果を通知する。ここに変換ロジックを書かない
+- `Dropvert.applescript` — droplet 本体。`on open` でドロップを受け、入力パスを一時ファイルに書いて `run.sh` を **1 回だけ** バックグラウンドで起動し、進行度を表示しながら完了を待ち、成功分をまとめて `trash.js` に渡し、結果を通知する。`on run`（ダブルクリック）は `Prefs` をバックグラウンドで起動するだけ。設定の**読み出し**はここに閉じ込め、`run.sh` / `convert.sh` からは読ませない（単体で呼んだときの再現性を保つため）。ここに変換ロジックを書かない
+- `Prefs.swift` — 設定ウィンドウ。`swiftc` でビルドして `Contents/Resources/Prefs` に同梱する。設定を**書くのはここだけ**。保存ボタンは持たず、値を変えた瞬間に `defaults` へ書く。設定項目は `enum Pref` の宣言（`PopUpSpec` / `CheckSpec`）にまとまっており、項目を増やすときはそこに 1 件足してレイアウトに 1 行加える。画面に出す文言は `enum L` に集約する（**このバイナリはアプリのバンドルを持たないため `NSLocalizedString` / `.lproj` が使えない**）。変換・削除・並列制御には一切関わらない
 - `run.sh` — 複数ファイルの変換を `xargs -P` で並列実行し、結果を集約するオーケストレータ。**元ファイルの削除は行わない**。stdout はタブ区切りのサマリ行のみを返す契約:
   - `TMP<TAB>作業ディレクトリ` — 必ず 1 行。呼び出し側が使い終わったら削除する
   - `CONVERTED<TAB>件数` / `SKIPPED<TAB>件数` / `UNPROCESSED<TAB>件数` — 必ず各 1 行。`SKIPPED` は変換の対象外だったもの（`.webp` など）、`UNPROCESSED` は `cancel` で着手しなかったもの。利用者に見せる文言を「スキップ」と「未処理」で区別するために分けている
   - `LIST<TAB>パス` — 成功が 1 件以上のときのみ。成功した **元ファイル**のパスを NUL 区切りで並べたファイル
   - `FAIL<TAB>ファイル名<TAB>理由` — 失敗 1 件につき 1 行
 
-  第 4 引数に作業ディレクトリを渡せる（省略時は `mktemp`）。呼び出し側が進行度を見張るため。作業ディレクトリの中身も契約の一部:
+  第 4 引数に作業ディレクトリを渡せる（省略時は `mktemp`）。呼び出し側が進行度を見張るため。第 5 引数は出力形式（省略時 `webp`）で、`convert.sh` にそのまま渡す。作業ディレクトリの中身も契約の一部:
   - `results/` — 1 ファイル完了ごとに 1 件増える。数えれば完了件数になる。結果は `parts/` に書いてから `mv` するので、「開始した件数」ではなく「完了した件数」を表す
   - `cancel` — 呼び出し側が作ると、未着手のファイルを変換せず `UNPROCESSED` として終える
   - `exit` — 処理を終えると必ず作られる。呼び出し側の待ちループの終了条件
 - `trash.js` — 渡されたパスを `NSFileManager` でゴミ箱へ移動する JXA スクリプト。失敗したパスを 1 行ずつ stdout に返す（**成功時は `undefined` を返して出力を 0 バイトにする**。空文字列を返すと `osascript` が改行を 1 つ出力してしまい、`xargs` の分割数だけ空行が積み上がって失敗と誤判定される）。**ここを Finder への AppleEvent に置き換えてはいけない**（下記「注意点」参照）
-- `convert.sh` — 1 ファイルの変換のみを担う。**元ファイルの削除は行わない**（責務分離）。stdout で結果を返す契約:
-  - 成功 → 生成した `.webp` の絶対パス
-  - 対象外 → `SKIP`
+- `convert.sh` — 1 ファイルの変換のみを担う。**元ファイルの削除は行わない**（責務分離）。第 3 引数が出力形式（省略時 `webp`）。stdout で結果を返す契約:
+  - 成功 → 生成したファイルの絶対パス（拡張子は出力形式による）
+  - 対象外 → `SKIP`（入力が出力形式と同じ形式のとき。`jpeg` は `.jpg` / `.jpeg` / `.jpe` を対象外とする）
   - 失敗 → `FAIL:理由`（理由は 1 行のみ）
-- `build.sh` — `osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleDocumentTypes`（`public.image`）を追加し、**最後に ad-hoc 署名を付け直す**
+- `build.sh` — `Prefs.swift` を `swiftc` でコンパイルし、`osacompile` でアプリを生成し、`run.sh` / `convert.sh` / `trash.js` / `Prefs` を `Contents/Resources/` にコピーし、`Info.plist` に `CFBundleIdentifier`（設定の保存先ドメイン）と `CFBundleDocumentTypes`（`public.image`）を設定し、**最後に ad-hoc 署名を付け直す**。Swift のコンパイルは既存の `.app` を消す前に行う（失敗しても手元のアプリを壊さないため）
+
+## 設定（`defaults`）
+
+設定は `defaults` のドメイン `io.github.suemura.dropvert` に保存します。キーはすべて string 型です。
+
+- `quality` — `"0"`〜`"100"` または `"lossless"`（既定 `"85"`）
+- `format` — `"webp"` / `"avif"` / `"jpeg"` / `"png"`（既定 `"webp"`）
+- `originalAction` — `"trash"` / `"keep"`（既定 `"trash"`）
+
+書くのは `Prefs.swift` だけ、読むのは `Dropvert.applescript` の `loadSettings` だけです。読み出しは毎回検証し、未設定・不正値なら既定値に落とします（**書き戻さない**。設定を触っていない利用者の plist を作らないため）。手で `defaults write` された値や古いバージョンが書いた値から身を守る役目もあるので、`Prefs` 側で検証しているからといって省かないでください。
+
+ドメイン名は `Dropvert.applescript` の `property prefsDomain`、`Prefs.swift` の `Pref.domain`、`build.sh` の `bundle_id` の **3 箇所に書いてあり、一致していないと設定が黙って無視されます**。値の語彙（`trash` / `keep` など）も両側で一致させてください。チェックボックスが off のときも `"keep"` を明示的に書きます（キーを消すと読み手が既定の `"trash"` に落ち、チェックを外したのに元ファイルがゴミ箱へ行きます）。
+
+形式ごとの品質の扱い（`sips` の実測に基づく）:
+
+- WebP — 数値は `cwebp -q N`、`lossless` は `cwebp -lossless`（本当に可逆）
+- JPEG — 数値は `sips -s formatOptions N`、`lossless` は `best`（可逆圧縮は存在しない）
+- AVIF — 数値は `sips -s formatOptions N`。ただし **`100` と `best` は sips が Error 13 で失敗する**ため、`100` と `lossless` はどちらも `99` に丸める
+- PNG — もともと可逆なので `formatOptions` を渡さない（渡しても無視される）
 
 stdout の契約は 2 段になっています。`convert.sh` の 1 行契約は `run.sh` が、`run.sh` のサマリ契約は AppleScript 側の分岐が依存しています。変更する場合は依存する側も同時に直してください。
 
@@ -45,12 +65,23 @@ stdout の契約は 2 段になっています。`convert.sh` の 1 行契約は
 ./build.sh /Applications    # 出力先を指定
 ```
 
+ビルドには `swiftc`（Xcode か Command Line Tools）が必要です。設定ウィンドウをコンパイルするためで、実行時に増える依存はありません。配布用ではなくローカルビルドなので、universal 化はせずネイティブアーキテクチャのみを作ります。
+
 ビルドは既存の `.app` を削除してから作り直します。ソースを編集したら必ず再ビルドしてください。**アプリ内の `convert.sh` を直接編集しても、次のビルドで上書きされます。**
 
 構文チェックのみ行う場合:
 
 ```sh
 osacompile -o /dev/null Dropvert.applescript
+bash -n convert.sh && bash -n run.sh && bash -n build.sh
+```
+
+設定ウィンドウだけを単体でビルドして動かす場合:
+
+```sh
+/Library/Developer/CommandLineTools/usr/bin/swiftc \
+  -sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
+  -O -o /tmp/Prefs Prefs.swift && /tmp/Prefs
 ```
 
 ## テスト方法
@@ -65,15 +96,25 @@ open -a ~/Applications/Dropvert.app /tmp/t/a.png /tmp/t/b.jpg
 # テスト素材の作り方（macOS 標準の壁紙を利用）
 sips -s format png /System/Library/CoreServices/DefaultDesktop.heic --out /tmp/t/a.png
 
-./convert.sh /tmp/t/a.png 85
+./convert.sh /tmp/t/a.png 85          # 第 3 引数を省略すると webp
+./convert.sh /tmp/t/a.png 85 avif     # webp / avif / jpeg / png
 
 # 複数ファイルをまとめて（第 3 引数は並列度。0 で hw.ncpu、1 で逐次）
 ls /tmp/t/*.png > /tmp/t.list
 ./run.sh /tmp/t.list 85 0
 
 # 第 4 引数に作業ディレクトリを渡すと進行度を覗ける（別のシェルで results/ を数える）
+# 第 5 引数は出力形式
 WD=$(mktemp -d -t dropvert-work)
-./run.sh /tmp/t.list 85 0 "$WD"
+./run.sh /tmp/t.list 85 0 "$WD" avif
+```
+
+設定を変えた状態の確認は `defaults` を直接書き換えるのが早い（設定画面を開く必要はない）。
+
+```sh
+defaults write io.github.suemura.dropvert format -string avif
+defaults write io.github.suemura.dropvert originalAction -string keep
+defaults delete io.github.suemura.dropvert     # デフォルトに戻す
 ```
 
 最低限、次のケースを確認してください。
@@ -81,7 +122,10 @@ WD=$(mktemp -d -t dropvert-work)
 - PNG / JPEG（大文字拡張子 `.JPG` を含む）
 - HEIC など `sips` 中間変換を通る形式
 - 出力名の衝突（同名 `.webp` が既にある状態）
-- `.webp` を入力 → `SKIP` を返すこと
+- `.webp` を入力 → `SKIP` を返すこと（出力形式が `jpeg` なら `.jpg`、`png` なら `.png` が `SKIP`）
+- 出力形式ごとの変換（`avif` / `jpeg` / `png`）と、`lossless` / `100` / `0` の品質指定
+- 未知の出力形式（`./convert.sh a.png 85 tiff`）→ `FAIL:未知の出力形式`
+- 不正な品質（`abc` / `150`）→ 既定の 85 で変換されること
 - 壊れたファイル（`echo bad > x.png`）→ `FAIL:` を返し、出力の残骸が残らないこと
 - フォルダ → 削除されないこと
 - スペース・日本語・絵文字を含むファイル名
@@ -103,9 +147,32 @@ WD=$(mktemp -d -t dropvert-work)
 - 進捗ウィンドウの「停止」を押す → 変換済みの分だけ元ファイルがゴミ箱へ移動し、通知が「中止 — N 件変換 / M 件未処理」になること。未着手のファイルは変換もされず削除もされないこと
 - 「停止」を連打する（後始末の最中にもう一度押す）→ ゴミ箱への移動・作業ディレクトリの削除・通知がすべて実行されること
 
+設定に関わる部分は次を確認してください。設定は GUI を開かなくても `defaults` を直接書けば試せます。
+
+- 設定を一度も触っていない状態（`defaults delete` 後）でドロップ → WebP / 品質 85 / ゴミ箱へ移動になること
+- `format` を `avif` にしてドロップ → `.avif` が生成されること
+- `originalAction` を `keep` にしてドロップ → 変換後も元ファイルが残ること
+- 不正な値（`format=bogus` / `quality=999` / `originalAction=nonsense`）を書いてドロップ → 既定値で動くこと
+- 設定ウィンドウを起動しただけ（何も操作せず閉じる）→ plist が作られないこと、保存済みの値が書き換わらないこと
+- 3 キーが `defaults read-type` で `string` を返すこと
+- **設定ウィンドウを開いたままドロップ** → 待たされずに変換が始まり、ウィンドウも生き残ること
+- ダブルクリックを繰り返す → `Prefs` のプロセスが 1 つのままで、ウィンドウが二重に開かないこと
+- `Contents/Resources/Prefs` を消したアプリのコピー（再署名する）を開く → 「設定画面を開けません」のアラートが出ること
+
+設定ウィンドウの見た目は自動で確認できません。次は人が見てください。
+
+- ウィンドウが前面に出る／タイトルバー右上の出力形式ポップアップが見えている
+- スライダーのドラッグ中にキャプションが追随し、離した時点で保存される
+- PNG に切り替えるとスライダーが無効になり、WebP に戻すと元の値で復帰する
+- 「デフォルトに戻す」で 3 項目とも既定値の表示に戻る
+- ⌘W / ⌘Q でウィンドウが閉じる
+
 ## 注意点
 
-- **macOS の `sips` は WebP を書き出せません**（読み込みのみ）。`sips --formats` で `org.webmproject.webp` に `Writable` が付いていないことが確認できます。書き出しは `cwebp`（`brew install webp`）が担当します
+- **macOS の `sips` は WebP を書き出せません**（読み込みのみ）。`sips --formats` で `org.webmproject.webp` に `Writable` が付いていないことが確認できます。書き出しは `cwebp`（`brew install webp`）が担当します。逆に AVIF / JPEG / PNG は `Writable` なので、`sips` だけで書き出せます（外部依存を増やさないため `avifenc` は使いません）
+- **`sips` の AVIF 書き出しは `formatOptions 100` と `best` で失敗します**（`Error 13: an unknown error occurred`。99 までは成功する）。品質 100 と `lossless` は 99 に丸めています。`formatOptions lossless` は受け付けられますが、実測では 99 指定よりずっと小さいファイルになり可逆ではないため使っていません
+- **`sips` の出力を予約済みの出力ファイルへ直接書かせないでください**。途中で失敗すると壊れた非 0 バイトのファイルが残り、呼び出し側が「変換成功」と誤認して元ファイルを削除します。一時ディレクトリへ書き、サイズを確認してから `mv` しています
+- **`set -u` の下で空配列を展開しないでください**。macOS の `/bin/bash` は 3.2 で、`arr=()` に対する `"${arr[@]}"` が `unbound variable` になります。`convert.sh` の `sips` オプション配列は必ず 1 要素以上を持たせ、`build.sh` の `swiftc_sdk` は空になりうるので `${arr[@]+"${arr[@]}"}` で展開しています。**`bash -n` では検出できません**（実行して初めて落ちます）。しかもこの環境では `swiftc` が Xcode のライセンス未同意で落ちてフォールバック側（配列に要素がある）を通るため、ライセンス同意済みの環境でしか露見しません。`swiftc` のスタブを PATH の先頭に置いて確かめられます
 - **ビルド後に bundle の中身を書き換えたら必ず再署名してください**。`osacompile` はアプリに ad-hoc 署名を付けます。その後 `Info.plist` や `Resources/` を変更すると署名が壊れ、`codesign --verify` が `invalid Info.plist (plist or signature have been modified)` を返す状態になります。この状態のアプリは macOS から不正扱いされ、**TCC の権限ダイアログが表示されないまま権限が拒否されます**（AppleEvents ならエラー -1743）。`build.sh` は最後に `codesign --force --sign -` を実行して検証まで行います
 - **ゴミ箱への移動に Finder を使ってはいけません**。`tell application "Finder" to delete` は AppleEvents（自動化）の権限を要求します。ad-hoc 署名のアプリは再ビルドごとに同一性が変わるため権限が定着せず、上記の署名問題とも重なって「ダイアログも出ないのに失敗する」状態になりました。`NSFileManager` の `trashItemAtURL`（`trash.js`）は権限を一切必要とせず、ゴミ箱の「元に戻す」も機能します
 - **droplet の PATH は最小構成です**。Homebrew のパスは通っていないため、`do shell script` の前に PATH を明示的に設定しています（`shellPrefix`）。新しい外部コマンドを使う場合は注意してください
@@ -120,6 +187,16 @@ WD=$(mktemp -d -t dropvert-work)
 - **「停止」は後始末の最中もずっと押せます**。進捗ウィンドウは `on open` を抜けるまで閉じられないため、変換後の処理中に 2 回目を押されても飛ばないよう、ゴミ箱への移動と後片付けを先に済ませて画面表示を最後に回し、表示部分は -128 を握り潰しています。ポーリングの `try` も `-128` 限定にせず、見張り自体が失敗した場合も中止扱いで同じ後始末経路に流します
 - **ゴミ箱へ移動するコマンドにパイプを足さないでください**。`do shell script` はパイプ全体（末尾のコマンド）の終了ステータスしか見ないため、`osascript` が起動できなかった場合の失敗を取りこぼします。ビルド後に `Resources/` を書き換えて再署名を忘れた状態がまさにこれに当たり、**元ファイルが 1 件もゴミ箱へ行っていないのに「N 件変換」と通知して静かに終わる**ことになります
 - **`run.sh` の生存確認に `kill -0` を使わないでください**。`exit` を書けなかった場合、PID が別プロセスに再利用されると永久に「実行中」を返してポーリングが終わりません。`ps -o command=` でコマンド行まで確認しています。中止待ちのループにも時間の上限を置いています
+- **設定ウィンドウは同期で待ってはいけません**。`do shell script` で `Prefs` の終了を待つと、アプレットは一度に 1 つのイベントしか扱えないため、**設定ウィンドウを開いている間にドロップされたファイルが処理されません**（ウィンドウを閉じるまで `on open` が始まらない）。バックグラウンドで起動して即座に制御を返し、二重に開かないための制御は `Prefs` 側（`flock` によるロックと distributed notification）に持たせています
+- **バックグラウンド起動は失敗を返しません**。シェルは即座に 0 を返すため、バイナリが壊れていても「ダブルクリックしても無反応」で終わります。**失敗したときだけ**終了コードを一時ファイルに書かせ（`... || echo $? >file`）、0.7 秒待って中身が空かどうかを見ています。成功時に書かせる形にすると、待ち時間の後にファイルを消しても、設定ウィンドウを閉じたときにリダイレクトが同じパスを作り直してゴミが残ります。この方式のため、設定ウィンドウを開いている間は終了コードを待つ `sh` プロセスが 1 つ並走します（CPU は使いません）。`pgrep -f` はこの `sh` のコマンド行にもマッチするので、プロセス数を数えるときは `pgrep -x Prefs` を使ってください
+- **`DispatchWorkItem` は `cancel()` したあと `perform()` しても本体が実行されません**。設定の遅延書き込みを「work item に持たせて flush で perform」する形にすると、**スライダーを動かして 0.2 秒以内にウィンドウを閉じた値が黙って消えます**。書き込む値そのものを保持してください
+- **`NSApp.terminate` ではウィンドウの `windowWillClose` が呼ばれません**。⌘W / ⌘Q を自前で拾って terminate する構成では、`applicationWillTerminate` でも遅延中の書き込みを flush する必要があります
+- **`NSTitlebarAccessoryViewController` の view は frame でサイズを与えてください**。素の `NSView` は intrinsic size を持たないため、Auto Layout の制約だけで組むと幅 0 に潰れ、**何も表示されないのにエラーも出ません**
+- **`Contents/Resources/` に置いた実行バイナリは通常のリソースとして封印されます**（`CodeResources` に `hash` / `hash2` だけが載り、`cdhash` を持つ nested code にはならない）。そのため `codesign --verify --deep --strict` は通ります。ただし bundle の署名より**前に**バイナリを個別に ad-hoc 署名してください。署名後に中身を差し替えると bundle の署名が壊れます（上の落とし穴と同じ）
+- **Xcode のライセンスに同意していない環境では `/usr/bin/swiftc` も `xcrun` も落ちます**（`You have not agreed to the Xcode license agreements`）。Command Line Tools の `swiftc` は使えますが、`xcrun` 経由で SDK を解決できないため `-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` を明示する必要があります。`build.sh` はこの順で自動的にフォールバックします
+- **設定ウィンドウの `NSApplication.activationPolicy` は `.accessory` です**。`.regular` にすると Dock に Dropvert とは別のアイコンがもう 1 つ出ます。代わりにメニューバーを持たないため、⌘W / ⌘Q は `NSEvent.addLocalMonitorForEvents` で自前で拾っています
+- **`CFBundleIdentifier` を変えると通知の許可や LaunchServices の登録がリセットされます**。設定の保存先ドメインでもあるため、変更すると保存済みの設定も読めなくなります（`build.sh` の `bundle_id` と `Dropvert.applescript` の `prefsDomain` は必ず一致させること）
+- **AppleScript の文字列比較は大文字小文字を区別しません**。`"LOSSLESS" is "lossless"` は true になります。`defaults` に保存する値は、比較で一致した側の定数を代入して正規化しています（シェル側は大文字小文字を区別するため）
 - `display notification` は失敗しても例外を投げないことがあります。処理の成否をこれで判断しないでください
 
 ## 開発ハーネス（`.claude/`）

@@ -1,24 +1,83 @@
--- Dropvert droplet: ドロップされた画像を WebP に変換し、成功したものだけ元ファイルをゴミ箱へ移動する
--- 変換品質 (0-100)。可逆圧縮にしたい場合は "lossless" と書く
-property webpQuality : "85"
+-- Dropvert droplet: ドロップされた画像を変換し、成功したものだけ元ファイルをゴミ箱へ移動する
+--   ダブルクリック (on run)  → 設定画面
+--   ドロップ    (on open)   → 保存済みの設定で即変換 (操作は増やさない)
+
+-- 設定の保存先ドメイン。build.sh が Info.plist に書く CFBundleIdentifier と
+-- 必ず一致させること。ずれると設定が黙って無視される。
+property prefsDomain : "io.github.suemura.dropvert"
+-- 設定を一度も触っていないときの値。ここだけで実用的に動くこと。
+property defaultQuality : "85"
+property defaultFormat : "webp"
+property defaultOriginal : "trash"
 -- 同時に変換する数。"0" で CPU コア数 (hw.ncpu)、"1" で逐次実行
 property parallelism : "0"
 
+-- 設定画面。同梱した Prefs (Swift 製) を開くだけ。設定の中身はあちらが持つ。
+--
+-- バックグラウンドで起動してすぐ制御を返すこと。同期で待つと、設定ウィンドウを
+-- 開いている間にドロップされたファイルが処理されない (アプレットは一度に 1 つの
+-- イベントしか扱えないため、on open が on run の後ろで待たされる)。
+-- ウィンドウが二重に開かないための制御は Prefs 側が持っている。
 on run
-	display dialog "画像ファイルをこのアプリのアイコンにドラッグ&ドロップしてください。" & return & return & "元と同じフォルダに .webp を作成し、成功したら元ファイルをゴミ箱へ移動します。" buttons {"OK"} default button 1 with title "Dropvert"
+	try
+		set prefsPath to POSIX path of (path to resource "Prefs")
+	on error
+		display alert "設定画面を開けません" message "アプリの内容が壊れています。build.sh で再ビルドしてください。" as critical
+		return
+	end try
+	-- バックグラウンド起動そのものは失敗を返さない (シェルは即座に 0 を返す)。
+	-- 起動できずに終わったことに気づけないと「ダブルクリックしても無反応」に
+	-- なってしまうので、失敗したときだけ終了コードを一時ファイルに書かせ、
+	-- 少しだけ様子を見る。
+	--
+	-- 正常に終わったときは何も書かない。ここで待つのは 0.7 秒だけで、設定
+	-- ウィンドウはそのあとも開かれ続けるため、「終了時に必ず書く」形にすると
+	-- 消したはずの一時ファイルがウィンドウを閉じたときに作り直されてしまう。
+	-- 既に開いていて二重起動をやめた場合 (終了コード 0) も書かれないので、
+	-- ファイルが空かどうかだけを見ればよい。
+	set statusPath to ""
+	try
+		set statusPath to do shell script "/usr/bin/mktemp -t dropvert-prefs"
+		do shell script "( " & quoted form of prefsPath & " >/dev/null 2>&1 || echo $? >" & quoted form of statusPath & " ) >/dev/null 2>&1 </dev/null &"
+	on error errMsg number errNum
+		my removeFile(statusPath)
+		if errNum is -128 then return
+		display alert "設定画面を開けません" message errMsg as critical
+		return
+	end try
+
+	try
+		delay 0.7
+	end try
+	set launchStatus to ""
+	try
+		set launchStatus to do shell script "/bin/cat " & quoted form of statusPath
+	end try
+	my removeFile(statusPath)
+	if launchStatus is not "" then
+		display alert "設定画面を開けません" message "設定画面を起動できませんでした（終了コード " & launchStatus & "）。build.sh で再ビルドしてください。" as critical
+	end if
 end run
 
 on open droppedItems
 	set shellPrefix to "export PATH=/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; "
 	set runnerPath to POSIX path of (path to resource "run.sh")
 
-	-- cwebp の存在確認
-	try
-		do shell script shellPrefix & "command -v cwebp"
-	on error
-		display alert "cwebp が見つかりません" message "Homebrew でインストールしてください:" & return & return & "brew install webp" as critical
-		return
-	end try
+	set s to my loadSettings()
+	set theQuality to quality of s
+	set theFormat to fmt of s
+	set theOriginal to orig of s
+
+	-- cwebp の存在確認。WebP だけは sips が書き出せず外部コマンドに頼るため、
+	-- 出力形式が WebP のときだけ確認する。
+	if theFormat is "webp" then
+		try
+			do shell script shellPrefix & "command -v cwebp"
+		on error
+			display alert "cwebp が見つかりません" message "WebP の書き出しには cwebp が必要です。Homebrew でインストールしてください:" & return & return & "brew install webp" & return & return & "アプリをダブルクリックすると、出力形式を AVIF / JPEG / PNG に変更できます (これらは追加のインストールなしで変換できます)。" as critical
+			return
+		end try
+	end if
 
 	-- 入力パスは一時ファイル経由で渡す。数百件ドロップされてもコマンドライン長の
 	-- 上限にかからない。ファイル名に改行を含むものは行がずれて別のファイルを
@@ -85,7 +144,7 @@ on open droppedItems
 		-- run.sh をバックグラウンドで起動し、PID を受け取って自分でポーリングする。
 		-- これで do shell script の暗黙のタイムアウト (2 分) にもかからない。
 		try
-			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of webpQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
+			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
 		on error errMsg
 			my removeFile(listPath)
 			my removeDir(workDir)
@@ -174,7 +233,7 @@ on open droppedItems
 		end repeat
 	end if
 
-	-- 変換に成功したものだけ、まとめてゴミ箱へ。
+	-- 変換に成功したものだけ、まとめてゴミ箱へ (設定が「残す」なら何もしない)。
 	-- Finder への AppleEvent を使うと自動化の権限が必要になるため、
 	-- NSFileManager を直接叩く JXA スクリプト (trash.js) に任せる。
 	-- 件数が多いときのためにパスは NUL 区切りのリストから xargs で渡す。
@@ -182,7 +241,7 @@ on open droppedItems
 	-- 閉じられない)。移動と後片付けを先に済ませ、画面表示は最後に回す。
 	-- こうしておけば連打で -128 が飛んできても消し残りが出ない。
 	set trashFailed to ""
-	if succListPath is not "" then
+	if succListPath is not "" and theOriginal is "trash" then
 		try
 			-- パイプを足してはいけない。do shell script はパイプ全体 (末尾のコマンド) の
 			-- 終了ステータスしか見ないため、osascript が起動できなかった場合の失敗を
@@ -224,6 +283,44 @@ on open droppedItems
 		end if
 	end try
 end open
+
+-- 設定の読み出し。保存先は defaults (~/Library/Preferences/<prefsDomain>.plist)。
+-- 書き込むのは設定ウィンドウ (Prefs) だけで、こちらは読むだけ。
+-- 値はすべて string で持ち、読むたびに検証して不正なら既定値に落とす
+-- (書き戻しはしない = 触っていなければ plist を作らない)。
+-- 手で defaults write された値や、古いバージョンが書いた値から身を守る役目もある。
+on readPref(theKey, fallback)
+	try
+		return do shell script "/usr/bin/defaults read " & quoted form of prefsDomain & " " & quoted form of theKey
+	on error
+		return fallback
+	end try
+end readPref
+
+on loadSettings()
+	set q to my readPref("quality", defaultQuality)
+	if my isValidQuality(q) is false then set q to defaultQuality
+	if q is "lossless" then set q to "lossless" -- 大文字表記を正規化する
+	set f to my readPref("format", defaultFormat)
+	if f is not in {"webp", "avif", "jpeg", "png"} then set f to defaultFormat
+	set o to my readPref("originalAction", defaultOriginal)
+	if o is not in {"trash", "keep"} then set o to defaultOriginal
+	return {quality:q, fmt:f, orig:o}
+end loadSettings
+
+-- 0〜100 の整数、または lossless だけを通す。"85.5" や "０" のような
+-- 見た目が紛らわしい値は、整数に直して文字列へ戻し一致するかで弾く。
+on isValidQuality(v)
+	if v is "lossless" then return true
+	try
+		set n to v as integer
+	on error
+		return false
+	end try
+	if (n as text) is not v then return false
+	if n < 0 or n > 100 then return false
+	return true
+end isValidQuality
 
 -- 進捗ウィンドウに出す「12 / 40 (30%)」の文字列。
 on progressText(doneCount, totalCount)

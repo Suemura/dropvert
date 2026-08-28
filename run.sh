@@ -1,10 +1,11 @@
 #!/bin/bash
 # 複数ファイルの変換を並列実行し、結果を集約する。
-#   使い方: run.sh <入力リストファイル> <品質: 0-100 または lossless> [並列度] [作業ディレクトリ]
+#   使い方: run.sh <入力リストファイル> <品質: 0-100 または lossless> [並列度] [作業ディレクトリ] [出力形式]
 #
 # 入力リストファイルは 1 行 1 パス（改行区切り）。
 # 並列度は省略・0・数値以外のとき hw.ncpu を使う。1 を指定すれば逐次実行。
 # 作業ディレクトリを渡すとそこを使う（呼び出し側が進行度を見張るため）。省略時は mktemp。
+# 出力形式は省略時 webp（対応形式は convert.sh を参照）。
 #
 # 出力(stdout): タブ区切りのサマリ行のみ。
 #   TMP<TAB><作業ディレクトリ>            必ず 1 行。呼び出し側が使い終わったら削除する
@@ -28,6 +29,7 @@ listfile="${1:-}"
 q="${2:-85}"
 par="${3:-0}"
 workdir="${4:-}"
+fmt="${5:-webp}"
 
 here=$(cd "$(dirname "$0")" && pwd)
 converter="$here/convert.sh"
@@ -87,10 +89,10 @@ seq 1 "$total" | xargs -P "$par" -I{} /bin/bash -c '
 		printf "CANCELLED" >"$2/parts/$idx"
 	else
 		src=$(cat "$2/inputs/$idx")
-		"$3" "$src" "$4" >"$2/parts/$idx" 2>/dev/null
+		"$3" "$src" "$4" "$5" >"$2/parts/$idx" 2>/dev/null
 	fi
 	mv -f "$2/parts/$idx" "$2/results/$idx"
-' _ {} "$tmp" "$converter" "$q"
+' _ {} "$tmp" "$converter" "$q" "$fmt"
 
 # 集約は逐次で行う（競合の余地をなくす）
 converted=0
