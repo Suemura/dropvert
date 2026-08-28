@@ -9,6 +9,7 @@ property prefsDomain : "io.github.suemura.dropvert"
 property defaultQuality : "85"
 property defaultFormat : "webp"
 property defaultOriginal : "trash"
+property defaultTrim : "off"
 -- 同時に変換する数。"0" で CPU コア数 (hw.ncpu)、"1" で逐次実行
 property parallelism : "0"
 
@@ -67,6 +68,12 @@ on open droppedItems
 	set theQuality to quality of s
 	set theFormat to fmt of s
 	set theOriginal to orig of s
+	-- シェル側の語彙は 1 / 0。設定の "on" / "off" をここで写す。
+	if trim of s is "on" then
+		set theTrim to "1"
+	else
+		set theTrim to "0"
+	end if
 
 	-- cwebp の存在確認。WebP だけは sips が書き出せず外部コマンドに頼るため、
 	-- 出力形式が WebP のときだけ確認する。
@@ -97,6 +104,7 @@ on open droppedItems
 	set skippedCount to 0
 	set unprocessedCount to 0
 	set succListPath to ""
+	set renListPath to ""
 	set tmpDir to ""
 	set listPath to ""
 	set workDir to ""
@@ -144,7 +152,7 @@ on open droppedItems
 		-- run.sh をバックグラウンドで起動し、PID を受け取って自分でポーリングする。
 		-- これで do shell script の暗黙のタイムアウト (2 分) にもかからない。
 		try
-			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
+			set runnerPID to do shell script shellPrefix & "/bin/bash " & quoted form of runnerPath & " " & quoted form of listPath & " " & quoted form of theQuality & " " & quoted form of parallelism & " " & quoted form of workDir & " " & quoted form of theFormat & " " & quoted form of theTrim & " >" & quoted form of outPath & " 2>&1 </dev/null & echo $!"
 		on error errMsg
 			my removeFile(listPath)
 			my removeDir(workDir)
@@ -226,6 +234,8 @@ on open droppedItems
 					set unprocessedCount to (item 2 of fields) as integer
 				else if tagName is "LIST" and (count of fields) ≥ 2 then
 					set succListPath to item 2 of fields
+				else if tagName is "RENAME" and (count of fields) ≥ 2 then
+					set renListPath to item 2 of fields
 				else if tagName is "FAIL" and (count of fields) ≥ 3 then
 					set end of failedList to (item 2 of fields) & " — " & (item 3 of fields)
 				end if
@@ -254,6 +264,20 @@ on open droppedItems
 			else
 				set trashFailed to errMsg
 			end if
+		end try
+	end if
+
+	-- 同じ形式のまま余白だけ削ったファイルは、元ファイルが名前を占有していたため
+	-- "-1" が付いている。元をゴミ箱へ移した今なら名前が空いているので戻す。
+	-- 元ファイルを残す設定のときは名前が空かないので何もしない。
+	--
+	-- 宛先が既にある場合は触らない。ゴミ箱への移動が失敗していれば元ファイルが
+	-- そこに残っているので、この確認がそのまま踏み潰しを防ぐ仕掛けになる
+	-- (mv -n と合わせて二重の歯止め)。失敗しても "-1" が付いたまま残るだけで、
+	-- 中身は失われない。通知を増やす価値がないので黙って進む。
+	if renListPath is not "" and theOriginal is "trash" then
+		try
+			do shell script "/usr/bin/xargs -0 -n 2 /bin/sh -c 'if [ ! -e \"$2\" ]; then /bin/mv -n -- \"$1\" \"$2\"; fi' _ < " & quoted form of renListPath
 		end try
 	end if
 
@@ -305,7 +329,9 @@ on loadSettings()
 	if f is not in {"webp", "avif", "jpeg", "png"} then set f to defaultFormat
 	set o to my readPref("originalAction", defaultOriginal)
 	if o is not in {"trash", "keep"} then set o to defaultOriginal
-	return {quality:q, fmt:f, orig:o}
+	set t to my readPref("trimPadding", defaultTrim)
+	if t is not in {"on", "off"} then set t to defaultTrim
+	return {quality:q, fmt:f, orig:o, trim:t}
 end loadSettings
 
 -- 0〜100 の整数、または lossless だけを通す。"85.5" や "０" のような

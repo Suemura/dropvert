@@ -73,9 +73,13 @@ if [ -z "$swiftc_bin" ] || ! "$swiftc_bin" -version >/dev/null 2>&1; then
 	swiftc_bin=/Library/Developer/CommandLineTools/usr/bin/swiftc
 	swiftc_sdk=(-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)
 fi
+# 2 つの .swift はどちらもトップレベルにコードを持つ独立したプログラムなので、
+# 1 回の呼び出しにまとめず 1 ファイルずつ型チェックする。
 if [ -x "$swiftc_bin" ]; then
-	run_check "swiftc -typecheck Prefs.swift" \
-		"$swiftc_bin" ${swiftc_sdk[@]+"${swiftc_sdk[@]}"} -typecheck "$here/Prefs.swift"
+	for f in "$here/Prefs.swift" "$here/Trim.swift"; do
+		run_check "swiftc -typecheck ${f##*/}" \
+			"$swiftc_bin" ${swiftc_sdk[@]+"${swiftc_sdk[@]}"} -typecheck "$f"
+	done
 else
 	ng "swiftc が見つかりません (xcode-select --install)"
 fi

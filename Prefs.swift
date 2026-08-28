@@ -71,6 +71,15 @@ enum Pref {
 		offValue: "keep",
 		onIsDefault: true)
 
+	/// 単色で塗りつぶされた余白の自動削除。既定は off。
+	/// 元の絵を削る操作なので、設定を触っていない利用者には起こらないようにする。
+	static let trim = CheckSpec(
+		key: "trimPadding",
+		title: L.trimCheckbox,
+		onValue: "on",
+		offValue: "off",
+		onIsDefault: false)
+
 	static let qualityKey = "quality"
 	static let qualityFallback = "85"
 
@@ -81,7 +90,7 @@ enum Pref {
 	/// それ以外の形式では「最高品質」として扱われる。
 	static let formatsWithLossless: Set<String> = ["webp"]
 
-	static let allKeys = [qualityKey, format.key, original.key]
+	static let allKeys = [qualityKey, format.key, original.key, trim.key]
 
 	/// スライダーの最右の位置。ここに合わせると quality に "lossless" を書く。
 	static let losslessTick = 101.0
@@ -106,6 +115,8 @@ enum L {
 	static let tickLossless = "可逆"
 	static let originalCheckbox = "変換に成功した元ファイルをゴミ箱に入れる"
 	static let originalNote = "変換に失敗したファイルは、どちらの設定でも削除されません。"
+	static let trimCheckbox = "単色で塗りつぶされた余白を自動で削除する"
+	static let trimNote = "完全に同じ色が続いている部分だけを削ります。GIF は対象外です。"
 	static let resetButton = "デフォルトに戻す"
 	static let dropHint = "画像ファイルをこのアプリのアイコンにドラッグ&ドロップすると変換します。"
 
@@ -270,6 +281,7 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 	private let tickLabels: NSStackView
 	private var formatPopUp: NSPopUpButton!
 	private var originalCheck: NSButton!
+	private var trimCheck: NSButton!
 
 	init(store: Store) {
 		self.store = store
@@ -330,6 +342,7 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 		tickLabels.distribution = .equalSpacing
 
 		originalCheck = makeCheckBox(Pref.original, store)
+		trimCheck = makeCheckBox(Pref.trim, store)
 
 		let separator = NSBox()
 		separator.boxType = .separator
@@ -356,6 +369,8 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 			separator,
 			originalCheck,
 			makeLabel(L.originalNote, small: true, secondary: true),
+			trimCheck,
+			makeLabel(L.trimNote, small: true, secondary: true),
 			hint,
 			resetRow,
 		])
@@ -368,6 +383,7 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 		stack.setCustomSpacing(16, after: tickLabels)
 		stack.setCustomSpacing(16, after: separator)
 		stack.setCustomSpacing(2, after: originalCheck)
+		stack.setCustomSpacing(2, after: trimCheck)
 
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		let content = NSView()
@@ -454,6 +470,7 @@ final class PrefsWindowController: NSObject, NSWindowDelegate {
 		let index = Pref.format.choices.firstIndex { $0.code == Pref.format.fallback } ?? 0
 		formatPopUp.selectItem(at: index)
 		originalCheck.state = Pref.original.onIsDefault ? .on : .off
+		trimCheck.state = Pref.trim.onIsDefault ? .on : .off
 		refreshQualityUI()
 	}
 
