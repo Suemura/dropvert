@@ -136,7 +136,8 @@ avif | jpeg | png)
 		# 失敗する (99 までは成功する)。可逆圧縮も無いので、最高品質は 99 で表す。
 		# sips には formatOptions lossless もあるが、実測では 99 よりずっと小さい
 		# ファイルになり可逆ではないため使わない。
-		if [ "$q" = "lossless" ] || [ "$q" -eq 100 ]; then
+		# 数値比較 (-eq) は使わない。"050" のような先頭ゼロを 8 進数として解釈するため。
+		if [ "$q" = "lossless" ] || [ "$q" = "100" ]; then
 			q=99
 		fi
 		sipsopts+=(-s formatOptions "$q")
