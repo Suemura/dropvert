@@ -2,8 +2,10 @@
 # 静的チェックをまとめて実行する。検査のみで、ビルド・変換・削除には一切関与しない。
 #   使い方: ./lint.sh
 #
-# shellcheck / shfmt が未インストールの環境では該当の層を SKIP して続行する
-# (exit 0 のまま)。導入は: brew install shellcheck shfmt
+# 未インストールの shfmt / shellcheck は該当の層を SKIP して続行する (exit 0 のまま)。
+# 導入は: brew install shellcheck shfmt
+# (この 2 行の語順が不自然なのは、コメントの最初の単語が shellcheck だと
+#  directive と誤解釈されて SC1073 になるため)
 # osacompile / node / swiftc はこのプロジェクトの開発に必須なので、欠けていれば NG。
 set -u
 

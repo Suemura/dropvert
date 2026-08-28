@@ -83,6 +83,9 @@ fi
 # cancel があれば変換せず CANCELLED を返す。中断でも「変換に失敗したファイル」を
 # 作らない。CANCELLED を SKIP と分けているのは、利用者に見せる文言を
 # 「対象外」と「未処理」で区別できるようにするため。
+# $1 等は子プロセスの bash が展開する位置引数で、シングルクォートは
+# 意図的（親シェルで展開させない）。SC2016 はその指摘なので無効化する。
+# shellcheck disable=SC2016
 seq 1 "$total" | xargs -P "$par" -I{} /bin/bash -c '
 	idx=$(printf "%04d" "$1")
 	if [ -e "$2/cancel" ]; then
