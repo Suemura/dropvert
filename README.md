@@ -203,6 +203,8 @@ ls ~/Pictures/*.png > /tmp/list.txt
 brew install shellcheck shfmt
 ```
 
+push と Pull Request では GitHub Actions（`macos-latest`）が同じチェックとビルド・署名検証を自動で実行します。変換そのものやドロップ操作は自動化されていないため、手元での確認が必要です。
+
 ## 名前について
 
 `Dropvert` = drop + convert。無関係の同名 Web サービス（dropvert.com）が存在しますが、本プロジェクトとは一切関係ありません。
